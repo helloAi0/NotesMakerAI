@@ -4,7 +4,6 @@ import {
   Trash2, Key, Check, X, AlertTriangle, RefreshCw, Settings2,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { GoogleGenAI } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -132,34 +131,49 @@ function withTimeout<T>(promise: Promise<T>, ms: number, controller?: AbortContr
   });
 }
 
+type AuthMode = 'header' | 'bearer' | 'query';
+const AUTH_ORDER: AuthMode[] = ['header', 'bearer', 'query'];
+const AUTH_LABEL: Record<AuthMode, string> = {
+  header: 'x-goog-api-key header',
+  bearer: 'Authorization: Bearer',
+  query: '?key= parameter',
+};
+const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+
+// The login method that last worked for the current key (learned automatically).
+let workingAuth: AuthMode | null = null;
+let workingKey = '';
+
+/** An HTTP error returned by the Gemini API. */
+class ApiError extends Error {
+  status: number;
+  reason?: string;
+  mode: AuthMode;
+  constructor(status: number, message: string, reason: string | undefined, mode: AuthMode) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.reason = reason;
+    this.mode = mode;
+  }
+}
+
 interface ApiErrInfo { status?: number; reason?: string; message: string }
 
 function parseApiError(e: any): ApiErrInfo {
-  const raw: string = String(e?.message ?? e ?? 'Unknown error');
-  let status: number | undefined = typeof e?.status === 'number' ? e.status : undefined;
-  let reason: string | undefined;
-  let message = raw;
-  try {
-    const j = JSON.parse(raw);
-    const err = j?.error ?? j;
-    if (!status && err?.code) status = Number(err.code);
-    reason = err?.details?.find((d: any) => d?.reason)?.reason;
-    if (err?.message) message = err.message;
-  } catch {
-    /* message was not JSON */
-  }
-  if (!reason && /ACCESS_TOKEN_TYPE_UNSUPPORTED/.test(raw)) reason = 'ACCESS_TOKEN_TYPE_UNSUPPORTED';
-  return { status, reason, message };
+  if (e instanceof ApiError) return { status: e.status, reason: e.reason, message: e.message };
+  return { message: String(e?.message ?? e ?? 'Unknown error') };
 }
 
 function friendlyError(e: any): string {
   const { status, reason, message } = parseApiError(e);
   if (reason === 'ACCESS_TOKEN_TYPE_UNSUPPORTED') {
     return (
-      'Google rejected this API key type (401 ACCESS_TOKEN_TYPE_UNSUPPORTED). The new "AQ." auth keys are ' +
-      'currently being refused by the Gemini generateContent endpoint for many developers, so this is not a bug in ' +
-      'the app. Try: (1) create a new key in a NEW project in Google AI Studio, or (2) create a standard API key in ' +
-      'Google Cloud Console and restrict it to the "Generative Language API", then paste it here.'
+      'Google refuses this key type for the Gemini API (401 ACCESS_TOKEN_TYPE_UNSUPPORTED), on every login method the ' +
+      'app tried. This is Google rejecting the new "AQ." key, not a bug in the app. Fix: create a standard key. In ' +
+      'Google Cloud Console go to APIs & Services > Credentials > Create credentials > API key, open the key, set ' +
+      'API restrictions > Restrict key > "Generative Language API" (enable it under Library first if it is not listed), ' +
+      'save, then paste that key here.'
     );
   }
   if (status === 401 || status === 403) {
@@ -169,56 +183,107 @@ function friendlyError(e: any): string {
   if (status === 503 || status === 500) return 'Gemini is overloaded right now. Please try again in a moment.';
   if (status === 400) return `Gemini rejected the request (400): ${message}`;
   if (/timed out/i.test(message)) {
-    return `${message}. The request never completed: check your internet connection, and if you use a VPN try turning it off, then retry.`;
+    return `${message}. Google never answered: check your internet connection, turn off any VPN or ad-blocker for localhost, and retry.`;
   }
   if (/failed to fetch|networkerror|load failed/i.test(message)) {
-    return "Could not reach Google's servers. Check your internet connection (and turn off any VPN), then retry.";
+    return "The browser could not reach Google's servers (network, VPN, firewall or ad-blocker). Turn off any VPN and retry.";
   }
   return message;
+}
+
+async function restGenerate(
+  key: string,
+  model: string,
+  prompt: string,
+  json: boolean,
+  mode: AuthMode,
+  signal: AbortSignal,
+): Promise<string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let url = `${API_BASE}/models/${model}:generateContent`;
+  if (mode === 'header') headers['x-goog-api-key'] = key;
+  else if (mode === 'bearer') headers['Authorization'] = `Bearer ${key}`;
+  else url += `?key=${encodeURIComponent(key)}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    signal,
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      ...(json ? { generationConfig: { responseMimeType: 'application/json' } } : {}),
+    }),
+  });
+
+  const raw = await res.text();
+  let data: any = null;
+  try { data = JSON.parse(raw); } catch { /* not JSON */ }
+
+  if (!res.ok) {
+    const err = data?.error;
+    throw new ApiError(
+      res.status,
+      err?.message ?? raw.slice(0, 300),
+      err?.details?.find((d: any) => d?.reason)?.reason,
+      mode,
+    );
+  }
+
+  const parts: any[] = data?.candidates?.[0]?.content?.parts ?? [];
+  const text = parts.filter(p => !p?.thought).map(p => p?.text ?? '').join('');
+  if (!text.trim()) {
+    const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason;
+    throw new Error(`The AI returned no text${why ? ` (${why})` : ''}. Please retry.`);
+  }
+  return text;
 }
 
 async function generate(
   apiKey: string,
   prompt: string,
-  opts: { json?: boolean; timeoutMs?: number; retries?: number } = {},
+  opts: { json?: boolean; timeoutMs?: number; retries?: number; log?: (line: string) => void } = {},
 ): Promise<string> {
-  const { json = false, timeoutMs = 180_000, retries = 2 } = opts;
-  const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
-  let lastErr: unknown = new Error('No Gemini model could be reached.');
+  const { json = false, timeoutMs = 180_000, retries = 2, log } = opts;
+  const key = apiKey.trim();
+  if (workingKey !== key) { workingKey = key; workingAuth = null; }
 
-  for (const model of MODELS) {
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      const controller = new AbortController();
-      try {
-        const res = await withTimeout(
-          ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: {
-              abortSignal: controller.signal,
-              ...(json ? { responseMimeType: 'application/json' } : {}),
-            },
-          }),
-          timeoutMs,
-          controller,
-        );
-        const text = res.text ?? '';
-        if (!text.trim()) throw new Error('The AI returned an empty response. Please retry.');
-        return text;
-      } catch (e) {
-        lastErr = e;
-        const { status } = parseApiError(e);
-        if (status === 404) break; // model not available -> try the next one
-        if (status && [429, 500, 503].includes(status) && attempt < retries) {
-          await sleep(status === 429 ? 8000 * (attempt + 1) : 1500 * (attempt + 1));
-          continue;
+  let lastErr: unknown = new Error('No Gemini model could be reached.');
+  let authErr: unknown;
+
+  models: for (const model of MODELS) {
+    const modes: AuthMode[] = workingAuth ? [workingAuth] : AUTH_ORDER;
+    for (const mode of modes) {
+      for (let attempt = 0; attempt <= retries; attempt++) {
+        const controller = new AbortController();
+        const started = Date.now();
+        try {
+          const text = await withTimeout(restGenerate(key, model, prompt, json, mode, controller.signal), timeoutMs, controller);
+          log?.(`OK    ${AUTH_LABEL[mode]} | ${model} | ${Date.now() - started} ms`);
+          workingAuth = mode;
+          return text;
+        } catch (e) {
+          lastErr = e;
+          const { status, reason, message } = parseApiError(e);
+          log?.(`FAIL  ${AUTH_LABEL[mode]} | ${model} | ${status ? `HTTP ${status}${reason ? ' ' + reason : ''}` : message.slice(0, 120)} | ${Date.now() - started} ms`);
+          if (status === 404) continue models;            // model not available: try the next model
+          if (status === 401 || status === 403) {         // login rejected: try the next login method
+            if (authErr === undefined) authErr = e;
+            break;
+          }
+          if (status && [429, 500, 503].includes(status) && attempt < retries) {
+            await sleep(status === 429 ? 8000 * (attempt + 1) : 1500 * (attempt + 1));
+            continue;
+          }
+          throw e;                                        // timeout, network error, bad request...
         }
-        throw e;
       }
     }
+    // Every login method was rejected, so switching model will not help.
+    throw authErr ?? lastErr;
   }
   throw lastErr;
 }
+
 
 function parseJsonLoose<T>(s: string): T {
   const cleaned = s.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -621,6 +686,7 @@ export default function PdfSourceLibrary() {
   const [showKeyInput, setShowKeyInput] = useState(!apiKey);
   const [keyStatus, setKeyStatus] = useState<'none' | 'testing' | 'valid' | 'invalid'>('none');
   const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyLog, setKeyLog] = useState<string[]>([]);
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string>('');
@@ -665,11 +731,20 @@ export default function PdfSourceLibrary() {
     setKeyStatus('testing');
     setKeyError(null);
 
+    // Every attempt is written to this log so you can see exactly what Google answered.
+    const lines: string[] = [];
+    const log = (line: string) => {
+      lines.push(line);
+      console.log('[Gemini key test]', line);
+      setKeyLog([...lines]);
+    };
+    setKeyLog([]);
+
     try {
-      await withTimeout(generate(key, 'Reply with the single word: OK', { timeoutMs: 25_000, retries: 0 }), 45_000);
+      await withTimeout(generate(key, 'Reply with the single word: OK', { timeoutMs: 20_000, retries: 0, log }), 60_000);
       setKeyStatus('valid');
       localStorage.setItem('gemini_api_key', key);
-      setTimeout(() => setShowKeyInput(false), 1000);
+      setTimeout(() => setShowKeyInput(false), 2500);
     } catch (e: any) {
       console.error('Key test failed:', e);
       setKeyError(friendlyError(e));
@@ -944,7 +1019,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
                   type="password"
                   placeholder="Paste your Gemini API key"
                   value={apiKey}
-                  onChange={(e) => { setApiKey(e.target.value); setKeyStatus('none'); setKeyError(null); }}
+                  onChange={(e) => { setApiKey(e.target.value); setKeyStatus('none'); setKeyError(null); setKeyLog([]); }}
                   onKeyDown={(e) => { if (e.key === 'Enter') testApiKey(); }}
                   className="bg-transparent text-xs outline-none w-48"
                 />
@@ -963,6 +1038,9 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
               </div>
               {keyError && (
                 <p className="text-[10px] text-red-500 max-w-sm break-words leading-snug">{keyError}</p>
+              )}
+              {keyLog.length > 0 && (
+                <pre className="text-[10px] leading-snug text-slate-600 bg-slate-100 border border-slate-300 rounded p-2 max-w-sm whitespace-pre-wrap break-words">{keyLog.join('\n')}</pre>
               )}
             </div>
           ) : (
