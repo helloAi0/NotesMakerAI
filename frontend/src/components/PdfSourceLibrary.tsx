@@ -9,6 +9,11 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import {
+  PROVIDERS, PROVIDER_IDS, docLimits, concurrencyFor, loadProvider, loadSaved, loadSpeed, saveConfig, saveProvider,
+  saveSpeed, generate, listModels, pMap, parseJsonLoose, friendlyError, withTimeout,
+} from '../lib/aiClient';
+import type { AiConfig, ProviderId, Speed } from '../lib/aiClient';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -41,7 +46,7 @@ interface FormulaItem {
   breakdown?: FormulaBreakdown[];
   example?: string | null;
 }
-interface FormulaResult { hasFormulas: boolean; formulas: FormulaItem[] }
+interface FormulaResult { hasFormulas: boolean; formulas: FormulaItem[]; partial?: boolean; total?: number; done?: number; failed?: number }
 
 type Audience = 'school' | 'undergraduate' | 'postgraduate' | 'competitive';
 type Difficulty = 'easy' | 'medium' | 'hard' | 'mixed';
@@ -69,7 +74,7 @@ interface QuizQuestion {
   explanation?: string;
   page?: number | null;
 }
-interface QuizSet { label: string; questions: QuizQuestion[] }
+interface QuizSet { label: string; questions: QuizQuestion[]; note?: string }
 
 interface DocResults { summary?: string; formulas?: FormulaResult; quiz?: QuizSet }
 type GenTab = 'summary' | 'formulas' | 'quiz';
@@ -80,31 +85,6 @@ interface EvalState { loading?: boolean; score?: number; outOf?: number; feedbac
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
 /* ------------------------------------------------------------------ */
-
-// Tried in order. If a model is not found for your key, the next one is used.
-const MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
-
-type Provider = 'gemini' | 'openrouter';
-
-const PROVIDERS: Record<Provider, { label: string; placeholder: string; help: string }> = {
-  gemini: {
-    label: 'Google Gemini',
-    placeholder: 'Paste your Gemini API key',
-    help: 'aistudio.google.com/app/apikey',
-  },
-  openrouter: {
-    label: 'OpenRouter (free models)',
-    placeholder: 'Paste your OpenRouter key (sk-or-...)',
-    help: 'openrouter.ai/keys',
-  },
-};
-
-// How much document text is sent per request. Free OpenRouter models have small context windows,
-// so documents are split into smaller parts for them.
-const LIMITS: Record<Provider, { single: number; chunk: number; qa: number; quiz: number }> = {
-  gemini: { single: 300_000, chunk: 200_000, qa: 250_000, quiz: 200_000 },
-  openrouter: { single: 60_000, chunk: 60_000, qa: 60_000, quiz: 60_000 },
-};
 
 const AUDIENCES: { id: Audience; label: string }[] = [
   { id: 'school', label: 'School' },
@@ -128,289 +108,6 @@ const QUESTION_TYPES: { id: QuestionType; label: string; hint: string }[] = [
   { id: 'long', label: 'Long answer', hint: '5-10 marks each' },
   { id: 'mixed', label: 'Mixed paper', hint: 'MCQ + short + long' },
 ];
-
-/* ------------------------------------------------------------------ */
-/*  Helpers: errors, timeouts, Gemini calls                            */
-/* ------------------------------------------------------------------ */
-
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-
-function withTimeout<T>(promise: Promise<T>, ms: number, controller?: AbortController): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      controller?.abort();
-      reject(new Error(`Request timed out after ${Math.round(ms / 1000)}s`));
-    }, ms);
-    promise.then(
-      v => { clearTimeout(timer); resolve(v); },
-      e => { clearTimeout(timer); reject(e); },
-    );
-  });
-}
-
-type AuthMode = 'header' | 'bearer' | 'query';
-const AUTH_ORDER: AuthMode[] = ['header', 'bearer', 'query'];
-const AUTH_LABEL: Record<AuthMode, string> = {
-  header: 'x-goog-api-key header',
-  bearer: 'Authorization: Bearer',
-  query: '?key= parameter',
-};
-const API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
-
-// The login method that last worked for the current key (learned automatically).
-let workingAuth: AuthMode | null = null;
-let workingKey = '';
-
-/** An HTTP error returned by the Gemini API. */
-class ApiError extends Error {
-  status: number;
-  reason?: string;
-  mode: AuthMode;
-  constructor(status: number, message: string, reason: string | undefined, mode: AuthMode) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.reason = reason;
-    this.mode = mode;
-  }
-}
-
-interface ApiErrInfo { status?: number; reason?: string; message: string }
-
-function parseApiError(e: any): ApiErrInfo {
-  if (e instanceof ApiError) return { status: e.status, reason: e.reason, message: e.message };
-  return { message: String(e?.message ?? e ?? 'Unknown error') };
-}
-
-function friendlyError(e: any): string {
-  const { status, reason, message } = parseApiError(e);
-  if (/data policy/i.test(message)) {
-    return (
-      'OpenRouter blocked the free models because of your privacy settings. Open openrouter.ai/settings/privacy and ' +
-      'allow free models (the exact wording of the option may differ), then retry.'
-    );
-  }
-  if (reason === 'ACCESS_TOKEN_TYPE_UNSUPPORTED') {
-    return (
-      'Google refuses this key type for the Gemini API (401 ACCESS_TOKEN_TYPE_UNSUPPORTED), on every login method the ' +
-      'app tried. This is Google rejecting the new "AQ." key, not a bug in the app. Fix: create a standard key. In ' +
-      'Google Cloud Console go to APIs & Services > Credentials > Create credentials > API key, open the key, set ' +
-      'API restrictions > Restrict key > "Generative Language API" (enable it under Library first if it is not listed), ' +
-      'save, then paste that key here.'
-    );
-  }
-  if (status === 401 || status === 403) {
-    return `The AI provider rejected the API key (${status}): ${message}. Check that the key is copied completely and matches the provider selected at the top right.`;
-  }
-  if (status === 402) return 'The provider says your account balance is negative (402). Add credits or switch provider.';
-  if (status === 429) return 'Rate limit or quota reached. Wait a minute and try again (free-tier keys have low limits).';
-  if (status === 503 || status === 500) return 'The AI service is overloaded right now. Please try again in a moment.';
-  if (status === 400) return `The AI service rejected the request (400): ${message}`;
-  if (/timed out/i.test(message)) {
-    return `${message}. The AI service never answered: check your internet connection, turn off any VPN or ad-blocker for localhost, and retry. If it keeps happening, switch provider at the top right.`;
-  }
-  if (/failed to fetch|networkerror|load failed/i.test(message)) {
-    return 'The browser could not reach the AI service (network, VPN, firewall or ad-blocker). Turn off any VPN and retry.';
-  }
-  return message;
-}
-
-async function restGenerate(
-  key: string,
-  model: string,
-  prompt: string,
-  json: boolean,
-  mode: AuthMode,
-  signal: AbortSignal,
-): Promise<string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  let url = `${API_BASE}/models/${model}:generateContent`;
-  if (mode === 'header') headers['x-goog-api-key'] = key;
-  else if (mode === 'bearer') headers['Authorization'] = `Bearer ${key}`;
-  else url += `?key=${encodeURIComponent(key)}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    signal,
-    body: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      ...(json ? { generationConfig: { responseMimeType: 'application/json' } } : {}),
-    }),
-  });
-
-  const raw = await res.text();
-  let data: any = null;
-  try { data = JSON.parse(raw); } catch { /* not JSON */ }
-
-  if (!res.ok) {
-    const err = data?.error;
-    throw new ApiError(
-      res.status,
-      err?.message ?? raw.slice(0, 300),
-      err?.details?.find((d: any) => d?.reason)?.reason,
-      mode,
-    );
-  }
-
-  const parts: any[] = data?.candidates?.[0]?.content?.parts ?? [];
-  const text = parts.filter(p => !p?.thought).map(p => p?.text ?? '').join('');
-  if (!text.trim()) {
-    const why = data?.promptFeedback?.blockReason || data?.candidates?.[0]?.finishReason;
-    throw new Error(`The AI returned no text${why ? ` (${why})` : ''}. Please retry.`);
-  }
-  return text;
-}
-
-interface GenOpts { json?: boolean; timeoutMs?: number; retries?: number; maxModels?: number; log?: (line: string) => void }
-
-async function generateGemini(
-  apiKey: string,
-  prompt: string,
-  opts: GenOpts = {},
-): Promise<string> {
-  const { json = false, timeoutMs = 180_000, retries = 2, log } = opts;
-  const key = apiKey.trim();
-  if (workingKey !== key) { workingKey = key; workingAuth = null; }
-
-  let lastErr: unknown = new Error('No Gemini model could be reached.');
-  let authErr: unknown;
-
-  models: for (const model of MODELS.slice(0, opts.maxModels ?? MODELS.length)) {
-    const modes: AuthMode[] = workingAuth ? [workingAuth] : AUTH_ORDER;
-    for (const mode of modes) {
-      for (let attempt = 0; attempt <= retries; attempt++) {
-        const controller = new AbortController();
-        const started = Date.now();
-        try {
-          const text = await withTimeout(restGenerate(key, model, prompt, json, mode, controller.signal), timeoutMs, controller);
-          log?.(`OK    ${AUTH_LABEL[mode]} | ${model} | ${Date.now() - started} ms`);
-          workingAuth = mode;
-          return text;
-        } catch (e) {
-          lastErr = e;
-          const { status, reason, message } = parseApiError(e);
-          log?.(`FAIL  ${AUTH_LABEL[mode]} | ${model} | ${status ? `HTTP ${status}${reason ? ' ' + reason : ''}` : message.slice(0, 120)} | ${Date.now() - started} ms`);
-          if (status === 404) continue models;            // model not available: try the next model
-          if (!status && /timed out/i.test(message)) continue models; // model never answered: try the next model
-          if (status === 401 || status === 403) {         // login rejected: try the next login method
-            if (authErr === undefined) authErr = e;
-            break;
-          }
-          if (status && [429, 500, 503].includes(status) && attempt < retries) {
-            await sleep(status === 429 ? 8000 * (attempt + 1) : 1500 * (attempt + 1));
-            continue;
-          }
-          throw e;                                        // timeout, network error, bad request...
-        }
-      }
-    }
-    // Every login method was rejected, so switching model will not help.
-    throw authErr ?? lastErr;
-  }
-  throw lastErr;
-}
-
-
-/* ---------- OpenRouter (free models) ---------- */
-
-const OPENROUTER = 'https://openrouter.ai/api/v1';
-let openRouterFree: string[] | null = null;
-
-/** Free models currently offered by OpenRouter, biggest context window first. */
-async function openRouterModels(): Promise<string[]> {
-  if (openRouterFree) return openRouterFree;
-  const controller = new AbortController();
-  const res = await withTimeout(fetch(`${OPENROUTER}/models`, { signal: controller.signal }), 15_000, controller);
-  if (!res.ok) return ['openrouter/free'];
-  const data: any = await res.json();
-  const list: any[] = Array.isArray(data?.data) ? data.data : [];
-  const free = list
-    .filter(m => typeof m?.id === 'string' && m.id.endsWith(':free'))
-    .filter(m => (m?.architecture?.output_modalities ?? ['text']).includes('text'))
-    .filter(m => (m?.context_length ?? 0) >= 32_000)
-    .sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0))
-    .map(m => m.id as string);
-  openRouterFree = ['openrouter/free', ...free].filter((id, i, all) => all.indexOf(id) === i);
-  return openRouterFree;
-}
-
-async function openRouterChat(key: string, model: string, prompt: string, json: boolean, signal: AbortSignal): Promise<string> {
-  const messages: { role: string; content: string }[] = [];
-  if (json) messages.push({ role: 'system', content: 'Respond with valid JSON only: no markdown fences and no commentary.' });
-  messages.push({ role: 'user', content: prompt });
-
-  const res = await fetch(`${OPENROUTER}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    signal,
-    body: JSON.stringify({ model, messages }),
-  });
-  const raw = await res.text();
-  let data: any = null;
-  try { data = JSON.parse(raw); } catch { /* not JSON */ }
-
-  // OpenRouter sometimes reports upstream failures inside an HTTP 200 response.
-  if (!res.ok || data?.error) {
-    const err = data?.error;
-    throw new ApiError(
-      res.ok ? Number(err?.code) || 502 : res.status,
-      typeof err?.message === 'string' ? err.message : raw.slice(0, 300),
-      undefined,
-      'bearer',
-    );
-  }
-  const text = data?.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || !text.trim()) {
-    throw new Error(`The AI returned no text (${data?.choices?.[0]?.finish_reason ?? 'empty'}). Please retry.`);
-  }
-  return text;
-}
-
-async function generateOpenRouter(apiKey: string, prompt: string, opts: GenOpts = {}): Promise<string> {
-  const { json = false, timeoutMs = 180_000, retries = 2, log } = opts;
-  const key = apiKey.trim();
-  const models = (await openRouterModels()).slice(0, (opts.maxModels ?? 6) + 1);
-  let lastErr: unknown = new Error('No free OpenRouter model could be reached.');
-
-  for (let round = 0; round <= retries; round++) {
-    for (const model of models) {
-      const controller = new AbortController();
-      const started = Date.now();
-      try {
-        const text = await withTimeout(openRouterChat(key, model, prompt, json, controller.signal), timeoutMs, controller);
-        log?.(`OK    OpenRouter | ${model} | ${Date.now() - started} ms`);
-        return text;
-      } catch (e) {
-        lastErr = e;
-        const { status, message } = parseApiError(e);
-        log?.(`FAIL  OpenRouter | ${model} | ${status ? `HTTP ${status}` : message.slice(0, 120)} | ${Date.now() - started} ms`);
-        if (status === 401 || status === 402 || status === 403) throw e; // key or credit problem: other models will not help
-        // anything else: try the next free model
-      }
-    }
-    if (round < retries) await sleep(8000 * (round + 1)); // every model busy: wait, then go round again
-  }
-  throw lastErr;
-}
-
-/** Sends one prompt to the selected provider and returns the text reply. */
-function generate(provider: Provider, apiKey: string, prompt: string, opts: GenOpts = {}): Promise<string> {
-  return provider === 'openrouter' ? generateOpenRouter(apiKey, prompt, opts) : generateGemini(apiKey, prompt, opts);
-}
-
-function parseJsonLoose<T>(s: string): T {
-  const cleaned = s.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
-  try {
-    return JSON.parse(cleaned) as T;
-  } catch {
-    const m = cleaned.match(/[[{][\s\S]*[\]}]/);
-    if (m) {
-      try { return JSON.parse(m[0]) as T; } catch { /* fall through */ }
-    }
-    throw new Error('The AI returned a response that was not valid JSON. Please retry.');
-  }
-}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers: document text selection                                   */
@@ -455,6 +152,54 @@ function spreadSample(pages: string[], maxChars: number): string {
     if (part) parts.push(part);
   }
   return parts.join('\n[... part of the document omitted ...]\n\n');
+}
+
+/** Text of pages [from, to) keeping the real page numbers, capped at maxChars. */
+function segmentText(pages: string[], from: number, to: number, maxChars: number): string {
+  let out = '';
+  for (let i = from; i < to; i++) {
+    const block = pageBlock(pages[i], i);
+    if (out && out.length + block.length > maxChars) break;
+    out += block;
+  }
+  return out;
+}
+
+const MATH_SIGNAL = /[=\u2211\u222b\u2202\u221a\u00b1\u2248\u2260\u2264\u2265\u00d7\u00f7\u221e\u2207\u0394\u03c0\u03c3\u03bc\u03bb\u03b8\u03c9\u03b1\u03b2\u03b3\u03b4\u03b5]|\\frac|\^\s*[\d{(a-z]|\b(?:sin|cos|tan|log|ln|exp|lim)\s*\(/gi;
+
+/** Rough count of math-like symbols on a page, used to skip pages that cannot contain formulas. */
+const mathScore = (text: string) => (text.match(MATH_SIGNAL) ?? []).length;
+
+function dedupeFormulas(list: FormulaItem[]): FormulaItem[] {
+  const seen = new Set<string>();
+  return list.filter(f => {
+    const key = cleanLatex(f.latex).replace(/\s+/g, '').toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Calls fn at most once per `ms` while text streams in, so long answers do not re-render hundreds of times. */
+function throttled(fn: (t: string) => void, ms = 120) {
+  let last = 0;
+  let pending: string | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    push(t: string) {
+      pending = t;
+      const now = Date.now();
+      if (now - last >= ms) { last = now; pending = null; fn(t); }
+      else if (!timer) {
+        timer = setTimeout(() => {
+          timer = undefined;
+          if (pending !== null) { last = Date.now(); const v = pending; pending = null; fn(v); }
+        }, ms);
+      }
+    },
+    flush(t: string) { if (timer) clearTimeout(timer); timer = undefined; pending = null; fn(t); },
+    cancel() { if (timer) clearTimeout(timer); timer = undefined; pending = null; },
+  };
 }
 
 const STOPWORDS = new Set(['the', 'and', 'for', 'are', 'was', 'what', 'which', 'who', 'how', 'why', 'when', 'where', 'does', 'did', 'this', 'that', 'with', 'from', 'about', 'into', 'have', 'has', 'can', 'you', 'your', 'tell', 'explain', 'give']);
@@ -527,10 +272,11 @@ Rules:
 - Write in clear English. If the document is in another language, still write in English and keep important terms in the original language in brackets.
 - Be thorough: this summary replaces reading the document, so do not skip chapters or sections.`;
 
-const summaryPrompt = (name: string, pageCount: number, text: string) => `
+const summaryPrompt = (name: string, pageCount: number, text: string, target: number) => `
 You are an expert academic summarizer. Write a complete, well-organized summary of the document "${name}" (${pageCount} pages).
 ${SUMMARY_STRUCTURE}
 ${SUMMARY_RULES}
+- Length: about ${target} words in total. Be efficient: no filler, no repetition.
 
 DOCUMENT TEXT:
 ${text}`;
@@ -541,21 +287,35 @@ You are reading part of the document "${name}" (pages ${from}-${to}). Write deta
 TEXT (pages ${from}-${to}):
 ${text}`;
 
-const summaryFromNotesPrompt = (name: string, pageCount: number, notes: string) => `
+const summaryFromNotesPrompt = (name: string, pageCount: number, notes: string, target: number) => `
 You are an expert academic summarizer. Below are detailed notes taken from consecutive parts of the document "${name}" (${pageCount} pages). Combine them into one complete, well-organized summary of the whole document.
 ${SUMMARY_STRUCTURE}
 ${SUMMARY_RULES}
+- Length: about ${target} words in total. Be efficient: no filler, no repetition.
 
 NOTES:
 ${notes}`;
 
-const formulaPrompt = (name: string, from: number, to: number, text: string) => `
-You are a meticulous scientist and teacher. Find every formula in pages ${from}-${to} of the document "${name}". "Formula" means a mathematical formula or equation, an inequality, a physical or chemical law written as an equation, a chemical reaction equation, a statistical or financial formula, or an algorithm complexity expression that the document itself states.
+const qaPrompt = (context: string, question: string) => `
+You are FRIDAY, an educational AI. Answer the question using ONLY the document text below.
+- If the answer is not in the text, say "I cannot find this in the document."
+- Answer directly and concisely (a short paragraph or a few bullets). Do not repeat the question.
+- Cite the pages you used like (p. 3); the text has "--- Page N ---" markers.
+- If the question is a general one such as "what is in this PDF", give a short overview of its contents.
+
+DOCUMENT TEXT:
+${context}
+
+QUESTION: ${question}`;
+
+const formulaPrompt = (name: string, text: string) => `
+You are a meticulous scientist and teacher. Find every formula in the pages below, from the document "${name}". "Formula" means a mathematical formula or equation, an inequality, a physical or chemical law written as an equation, a chemical reaction equation, a statistical or financial formula, or an algorithm complexity expression that the document itself states.
 
 Strict rules:
-- Only include formulas that really appear in the text below. Never invent or add formulas from your own knowledge.
+- Only include formulas that really appear in the text. Never invent or add formulas from your own knowledge.
 - The text was extracted from a PDF, so equations are often garbled (symbols split, subscripts and fractions flattened). Reconstruct each formula carefully into valid LaTeX. Set "confidence" to "exact" if the text was clean and "reconstructed" if you had to interpret garbled text.
 - If the pages contain no formulas, return {"formulas": []}.
+- Keep every text field SHORT so the answer is fast: "purpose" 1-2 sentences, each variable "meaning" under 12 words, each "breakdown" explanation 1 sentence, "example" only if it is a quick numeric one (otherwise null).
 
 For each formula return an object with these keys:
 - "name": what the formula is called, or a short descriptive name
@@ -563,14 +323,14 @@ For each formula return an object with these keys:
 - "plainText": the formula in plain text, e.g. "F = m * a"
 - "page": the page number where it appears (integer) or null
 - "confidence": "exact" or "reconstructed"
-- "purpose": 2-3 sentences on what the formula computes and why the document uses it
+- "purpose": what the formula computes and why the document uses it
 - "variables": array of {"symbol": LaTeX for the symbol, "meaning": what it represents, "unit": unit or null}, covering EVERY symbol in the formula
-- "breakdown": array of {"part": LaTeX of one term / factor / operator group, "explanation": what that part does and how it affects the result}, walking through the formula piece by piece
-- "example": a short worked numeric example, or null if one would be forced
+- "breakdown": array of {"part": LaTeX of one term / factor / operator group, "explanation": what that part does}, walking through the formula piece by piece
+- "example": a short worked numeric example, or null
 
 Return ONLY JSON: {"formulas": [ ... ]}
 
-TEXT (pages ${from}-${to}):
+TEXT:
 ${text}`;
 
 function describeAudience(c: QuizConfig): string {
@@ -608,24 +368,30 @@ const DIFFICULTY_TEXT: Record<Difficulty, string> = {
   mixed: 'Mixed: roughly 30% easy, 40% medium, 30% hard, in random order.',
 };
 
-function quizPrompt(name: string, c: QuizConfig, text: string): string {
-  const mix = questionMix(c);
+function quizPrompt(
+  name: string,
+  c: QuizConfig,
+  text: string,
+  mix: { mcq: number; short: number; long: number },
+  range?: { from: number; to: number },
+): string {
+  const total = mix.mcq + mix.short + mix.long;
   return `
-You are an expert exam-paper setter. Create a practice paper from the document "${name}".
+You are an expert exam-paper setter. Create part of a practice paper from the document "${name}"${range ? ` (use pages ${range.from}-${range.to})` : ''}.
 
 Student: ${describeAudience(c)}.
 Difficulty: ${DIFFICULTY_TEXT[c.difficulty]}
-Total questions: exactly ${c.count}, made up of ${mix.mcq} MCQ, ${mix.short} short-answer and ${mix.long} long-answer questions.
+Total questions: exactly ${total}, made up of ${mix.mcq} MCQ, ${mix.short} short-answer and ${mix.long} long-answer questions.
 
 Rules:
 - Every question must be answerable from the document's content. Do not use outside facts. Match vocabulary, depth and question style to the student's level (and, for competitive exams, to that exam's style).
-- Spread the questions across the whole document, not just the beginning.
+- Cover different topics; no two questions may test the same fact.
 - MCQ: exactly 4 options written as plain text WITHOUT "A)" / "1." prefixes, exactly one correct, plausible distractors. "correctIndex" is the 0-based index of the correct option. marks = 1.
 - Short answer: answer expected in 2-4 sentences, marks 2-3.
-- Long answer: answer expected in a detailed paragraph or structured points, marks 5-10 depending on difficulty.
-- For short and long questions give "answer" (a complete model answer) and "keyPoints" (3-6 marking points).
+- Long answer: answer expected in a structured paragraph or points, marks 5-10 depending on difficulty.
+- For short and long questions give "answer" (a model answer) and "keyPoints" (3-5 short marking points).
 - For MCQ, "answer" is the text of the correct option.
-- "explanation": why the correct answer is right and, for MCQ, why each wrong option is wrong.
+- "explanation": ONE or TWO sentences on why the correct answer is right. Keep it short.
 - "page": the main page the question is based on (integer) or null.
 
 Return ONLY a JSON array, no other text:
@@ -796,20 +562,22 @@ function FormulaCard({ f, index }: { f: FormulaItem; index: number }) {
 export default function PdfSourceLibrary() {
   // The key can also come from a .env.local file: VITE_GEMINI_API_KEY=your_key
   const envKey: string = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-  const storedKey = (p: Provider) =>
-    localStorage.getItem(`ai_key_${p}`) || (p === 'gemini' ? localStorage.getItem('gemini_api_key') || envKey : '');
-  const [provider, setProvider] = useState<Provider>(() => (localStorage.getItem('ai_provider') === 'openrouter' ? 'openrouter' : 'gemini'));
-  const [apiKey, setApiKey] = useState<string>(() => storedKey(provider));
-  const [showKeyInput, setShowKeyInput] = useState(!apiKey);
+  const [cfg, setCfg] = useState<AiConfig>(() => {
+    const provider = loadProvider();
+    return { provider, speed: loadSpeed(), ...loadSaved(provider, envKey) };
+  });
+  const provider = cfg.provider;
+  const [showKeyInput, setShowKeyInput] = useState(!cfg.apiKey);
   const [keyStatus, setKeyStatus] = useState<'none' | 'testing' | 'valid' | 'invalid'>('none');
   const [keyError, setKeyError] = useState<string | null>(null);
   const [keyLog, setKeyLog] = useState<string[]>([]);
+  const [modelList, setModelList] = useState<string[]>([]);
 
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string>('');
   const [ragQuery, setRagQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
-  const [ragResult, setRagResult] = useState<{ answer: string; citations: { page: number; excerpt: string }[] } | null>(null);
+  const [ragAnswer, setRagAnswer] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabKey>('qa');
 
@@ -835,7 +603,7 @@ export default function PdfSourceLibrary() {
   const [evals, setEvals] = useState<Record<number, EvalState>>({});
 
   const selectedDoc = documents.find(d => d.id === selectedDocId);
-  const lim = LIMITS[provider];
+  const lim = docLimits(cfg);
   const docResults: DocResults = (selectedDocId && results[selectedDocId]) || {};
   const quiz = docResults.quiz;
 
@@ -843,18 +611,26 @@ export default function PdfSourceLibrary() {
 
   /* ---------------- API key ---------------- */
 
-  const changeProvider = (p: Provider) => {
-    setProvider(p);
-    localStorage.setItem('ai_provider', p);
-    setApiKey(storedKey(p));
-    setKeyStatus('none');
-    setKeyError(null);
-    setKeyLog([]);
+  const resetKeyState = () => { setKeyStatus('none'); setKeyError(null); setKeyLog([]); };
+
+  const updateCfg = (patch: Partial<AiConfig>) => {
+    const next = { ...cfg, ...patch };
+    setCfg(next);
+    saveConfig(next);
+    if ('apiKey' in patch || 'model' in patch || 'baseUrl' in patch) resetKeyState();
   };
 
+  const changeProvider = (p: ProviderId) => {
+    saveProvider(p);
+    setCfg({ provider: p, speed: cfg.speed, ...loadSaved(p, envKey) });
+    setModelList([]);
+    resetKeyState();
+  };
+
+  const changeSpeed = (sp: Speed) => { saveSpeed(sp); setCfg(c => ({ ...c, speed: sp })); };
+
   const testApiKey = async () => {
-    const key = apiKey.trim();
-    if (!key) { setKeyError('Paste your API key first.'); return; }
+    if (!cfg.apiKey.trim()) { setKeyError('Paste your API key first.'); return; }
     setKeyStatus('testing');
     setKeyError(null);
 
@@ -868,9 +644,10 @@ export default function PdfSourceLibrary() {
     setKeyLog([]);
 
     try {
-      await withTimeout(generate(provider, key, 'Reply with the single word: OK', { timeoutMs: 25_000, retries: 0, maxModels: 3, log }), 120_000);
+      await withTimeout(generate(cfg, 'Reply with the single word: OK', { timeoutMs: 25_000, retries: 0, maxModels: 3, log }), 120_000);
       setKeyStatus('valid');
-      localStorage.setItem(`ai_key_${provider}`, key);
+      saveConfig(cfg);
+      listModels(cfg).then(setModelList);
       setTimeout(() => setShowKeyInput(false), 2500);
     } catch (e: any) {
       console.error('Key test failed:', e);
@@ -898,7 +675,7 @@ export default function PdfSourceLibrary() {
       uploadDate: 'Just now',
     }, ...prev]);
     setSelectedDocId(newDocId);
-    setRagResult(null);
+    setRagAnswer(null);
     setTabError(null);
 
     try {
@@ -934,32 +711,19 @@ export default function PdfSourceLibrary() {
   const handleRagSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ragQuery.trim() || !selectedDoc || selectedDoc.status !== 'Ready') return;
-    if (!apiKey.trim()) { setRagResult({ answer: 'Add and verify your API key (top right) first.', citations: [] }); setShowKeyInput(true); return; }
+    if (!cfg.apiKey.trim()) { setRagAnswer('Add and verify your API key (top right) first.'); setShowKeyInput(true); return; }
 
     setIsSearching(true);
-    setRagResult(null);
+    setRagAnswer('');
+    const live = throttled(setRagAnswer);
 
     try {
       const context = selectRelevantPages(selectedDoc.pageTexts, ragQuery, lim.qa);
-      const prompt = `
-You are FRIDAY, an elite educational AI.
-Answer the user's question using ONLY the document text below.
-If the answer is not in the text, say "I cannot find this in the document."
-Give a clear, complete answer and cite the page numbers ("--- Page N ---" markers) where it was found.
-
-DOCUMENT TEXT:
-${context}
-
-USER QUESTION: ${ragQuery}
-
-Return ONLY a JSON object exactly like this:
-{"answer": "Your detailed answer.", "citations": [{"page": 1, "excerpt": "short exact quote from the text"}]}`;
-
-      const response = await generate(provider, apiKey, prompt, { json: true });
-      const parsed = parseJsonLoose<{ answer: string; citations?: { page: number; excerpt: string }[] }>(response);
-      setRagResult({ answer: parsed.answer ?? '', citations: parsed.citations ?? [] });
+      const text = await generate(cfg, qaPrompt(context, ragQuery), { onText: live.push });
+      live.flush(text);
     } catch (err: any) {
-      setRagResult({ answer: 'Error: ' + friendlyError(err), citations: [] });
+      live.cancel();
+      setRagAnswer(prev => (prev ? prev + '\n\n' : '') + '**Error:** ' + friendlyError(err));
     } finally {
       setIsSearching(false);
     }
@@ -967,46 +731,130 @@ Return ONLY a JSON object exactly like this:
 
   /* ---------------- Summary / Formulas / Quiz ---------------- */
 
-  const buildSummary = async (doc: DocumentItem): Promise<string> => {
-    if (doc.textContent.length <= lim.single) {
-      return generate(provider, apiKey, summaryPrompt(doc.name, doc.pages, doc.textContent));
+  const patchResults = (docId: string, patch: Partial<DocResults>) =>
+    setResults(prev => ({ ...prev, [docId]: { ...prev[docId], ...patch } }));
+
+  const buildSummary = async (doc: DocumentItem) => {
+    const live = throttled(t => patchResults(doc.id, { summary: t }));
+    const words = doc.textContent.split(/\s+/).length;
+    const target = Math.min(1800, Math.max(450, Math.round(words / 6)));
+    try {
+      let text: string;
+      if (doc.textContent.length <= lim.single) {
+        text = await generate(cfg, summaryPrompt(doc.name, doc.pages, doc.textContent, target), { onText: live.push });
+      } else {
+        const chunks = chunkPages(doc.pageTexts, lim.chunk);
+        let done = 0;
+        setProgress(`Reading ${chunks.length} parts of the document at the same time...`);
+        const settled = await pMap(chunks, concurrencyFor(cfg), async c => {
+          const notes = await generate(cfg, notesPrompt(doc.name, c.from, c.to, c.text));
+          done++;
+          setProgress(`Read ${done} of ${chunks.length} parts...`);
+          return notes;
+        });
+        const bad = settled.find(r => r.status === 'rejected') as PromiseRejectedResult | undefined;
+        if (bad) throw bad.reason;
+        const notes = settled.map(r => (r as PromiseFulfilledResult<string>).value);
+        setProgress('Writing the final summary...');
+        text = await generate(cfg, summaryFromNotesPrompt(doc.name, doc.pages, notes.join('\n\n'), target), { onText: live.push });
+      }
+      live.flush(text);
+    } catch (e) {
+      live.cancel();
+      throw e;
     }
-    const chunks = chunkPages(doc.pageTexts, lim.chunk);
-    const notes: string[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      setProgress(`Reading part ${i + 1} of ${chunks.length} (pages ${chunks[i].from}-${chunks[i].to})...`);
-      notes.push(await generate(provider, apiKey, notesPrompt(doc.name, chunks[i].from, chunks[i].to, chunks[i].text)));
-    }
-    setProgress('Combining everything into the final summary...');
-    return generate(provider, apiKey, summaryFromNotesPrompt(doc.name, doc.pages, notes.join('\n\n')));
   };
 
-  const buildFormulas = async (doc: DocumentItem): Promise<FormulaResult> => {
-    const chunks = chunkPages(doc.pageTexts, doc.textContent.length <= lim.single ? lim.single : lim.chunk);
-    const all: FormulaItem[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      if (chunks.length > 1) setProgress(`Scanning part ${i + 1} of ${chunks.length} (pages ${chunks[i].from}-${chunks[i].to})...`);
-      const raw = await generate(provider, apiKey, formulaPrompt(doc.name, chunks[i].from, chunks[i].to, chunks[i].text), { json: true });
-      const parsed = parseJsonLoose<{ formulas?: FormulaItem[] } | FormulaItem[]>(raw);
-      const list = Array.isArray(parsed) ? parsed : parsed.formulas ?? [];
-      all.push(...list.filter(f => f && typeof f.latex === 'string' && f.latex.trim()));
+  const buildFormulas = async (doc: DocumentItem) => {
+    // Only pages that contain math-like symbols are sent to the AI. No such pages = instant answer, no request at all.
+    const candidates = doc.pageTexts.map((t, i) => ({ t, i })).filter(p => mathScore(p.t) >= 2);
+    if (candidates.length === 0) {
+      patchResults(doc.id, { formulas: { hasFormulas: false, formulas: [] } });
+      return;
     }
-    const seen = new Set<string>();
-    const formulas = all.filter(f => {
-      const key = cleanLatex(f.latex).replace(/\s+/g, '').toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }).map(f => ({ ...f, variables: Array.isArray(f.variables) ? f.variables : [] }));
-    return { hasFormulas: formulas.length > 0, formulas };
+
+    const batches: string[] = [];
+    let cur = '';
+    for (const p of candidates) {
+      const block = pageBlock(p.t, p.i);
+      if (cur && cur.length + block.length > 18_000) { batches.push(cur); cur = ''; }
+      cur += block;
+    }
+    if (cur) batches.push(cur);
+
+    const found: FormulaItem[] = [];
+    let done = 0;
+    let failed = 0;
+    let firstErr: unknown;
+    const publish = () => {
+      const formulas = dedupeFormulas(found).map(f => ({ ...f, variables: Array.isArray(f.variables) ? f.variables : [] }));
+      patchResults(doc.id, {
+        formulas: { hasFormulas: formulas.length > 0, formulas, partial: done + failed < batches.length, total: batches.length, done, failed },
+      });
+      setProgress(`Scanned ${done + failed} of ${batches.length} parts · ${formulas.length} formula${formulas.length === 1 ? '' : 's'} so far`);
+    };
+    publish();
+
+    await pMap(batches, concurrencyFor(cfg), async batch => {
+      try {
+        const raw = await generate(cfg, formulaPrompt(doc.name, batch), { json: true });
+        const parsed = parseJsonLoose<{ formulas?: FormulaItem[] } | FormulaItem[]>(raw);
+        const list = Array.isArray(parsed) ? parsed : parsed.formulas ?? [];
+        found.push(...list.filter(f => f && typeof f.latex === 'string' && f.latex.trim()));
+        done++;
+      } catch (e) {
+        failed++;
+        firstErr ??= e;
+      }
+      publish(); // results appear as soon as each part is finished
+    });
+
+    if (failed === batches.length) {
+      patchResults(doc.id, { formulas: undefined });
+      throw firstErr;
+    }
   };
 
-  const buildQuiz = async (doc: DocumentItem): Promise<QuizSet> => {
-    const cfg: QuizConfig = { ...qCfg, count: Math.min(30, Math.max(1, Math.round(qCfg.count || 10))) };
-    const context = spreadSample(doc.pageTexts, lim.quiz);
-    const raw = await generate(provider, apiKey, quizPrompt(doc.name, cfg, context), { json: true, retries: 2 });
-    const parsed = parseJsonLoose<QuizQuestion[] | { questions: QuizQuestion[] }>(raw);
-    const list = Array.isArray(parsed) ? parsed : parsed.questions ?? [];
+  const buildQuiz = async (doc: DocumentItem) => {
+    const qc: QuizConfig = { ...qCfg, count: Math.min(30, Math.max(1, Math.round(qCfg.count || 10))) };
+    const mix = questionMix(qc);
+    const types: ('mcq' | 'short' | 'long')[] = [
+      ...Array<'mcq'>(mix.mcq).fill('mcq'),
+      ...Array<'short'>(mix.short).fill('short'),
+      ...Array<'long'>(mix.long).fill('long'),
+    ];
+
+    // Several small requests run at the same time instead of one big one.
+    const nBatches = Math.min(6, Math.max(1, Math.ceil(qc.count / 5)));
+    const perBatch: ('mcq' | 'short' | 'long')[][] = Array.from({ length: nBatches }, () => []);
+    types.forEach((t, i) => perBatch[i % nBatches].push(t));
+
+    const shortDoc = doc.textContent.length < 12_000;
+    const segSize = Math.ceil(doc.pageTexts.length / nBatches);
+    const jobs = perBatch.map((ts, b) => {
+      const from = b * segSize;
+      const to = Math.min(doc.pageTexts.length, from + segSize);
+      const bm = { mcq: ts.filter(t => t === 'mcq').length, short: ts.filter(t => t === 'short').length, long: ts.filter(t => t === 'long').length };
+      const whole = nBatches === 1 || shortDoc || from >= to;
+      return {
+        mix: bm,
+        range: whole ? undefined : { from: from + 1, to },
+        text: whole ? spreadSample(doc.pageTexts, lim.quiz) : segmentText(doc.pageTexts, from, to, Math.floor(lim.quiz / 2)),
+      };
+    }).filter(j => j.mix.mcq + j.mix.short + j.mix.long > 0);
+
+    let done = 0;
+    setProgress(`Writing ${qc.count} questions in ${jobs.length} part${jobs.length === 1 ? '' : 's'} at the same time...`);
+    const settled = await pMap(jobs, concurrencyFor(cfg), async j => {
+      const raw = await generate(cfg, quizPrompt(doc.name, qc, j.text, j.mix, j.range), { json: true });
+      done++;
+      setProgress(`Finished ${done} of ${jobs.length} parts...`);
+      const parsed = parseJsonLoose<QuizQuestion[] | { questions: QuizQuestion[] }>(raw);
+      return Array.isArray(parsed) ? parsed : parsed.questions ?? [];
+    });
+
+    const rejected = settled.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
+    const list = settled.flatMap(r => (r.status === 'fulfilled' ? r.value : []));
 
     const questions = list
       .filter(q => q && typeof q.question === 'string')
@@ -1019,14 +867,18 @@ Return ONLY a JSON object exactly like this:
         return q.type === 'short' || q.type === 'long';
       });
 
-    if (questions.length === 0) throw new Error('The AI did not return usable questions. Please try again.');
-    return { label: quizLabel(cfg), questions };
+    if (questions.length === 0) throw rejected[0]?.reason ?? new Error('The AI did not return usable questions. Please try again.');
+    const note = questions.length < qc.count
+      ? `${questions.length} of ${qc.count} questions were generated${rejected.length ? ' (some parts failed)' : ''}. Use "Change settings" to generate again.`
+      : undefined;
+    patchResults(doc.id, { quiz: { label: quizLabel(qc), questions, note } });
+    resetQuizAnswers();
   };
 
   const runGeneration = async (tab: GenTab) => {
     const doc = selectedDoc;
     if (!doc || doc.status !== 'Ready') return;
-    if (!apiKey.trim()) {
+    if (!cfg.apiKey.trim()) {
       setTabError({ tab, message: 'Add and verify your API key (top right) first.' });
       setShowKeyInput(true);
       return;
@@ -1040,15 +892,13 @@ Return ONLY a JSON object exactly like this:
 
     try {
       if (tab === 'summary') {
-        const summary = await buildSummary(doc);
-        setResults(prev => ({ ...prev, [doc.id]: { ...prev[doc.id], summary } }));
+        patchResults(doc.id, { summary: undefined });
+        await buildSummary(doc);
       } else if (tab === 'formulas') {
-        const formulas = await buildFormulas(doc);
-        setResults(prev => ({ ...prev, [doc.id]: { ...prev[doc.id], formulas } }));
+        patchResults(doc.id, { formulas: undefined });
+        await buildFormulas(doc);
       } else {
-        const q = await buildQuiz(doc);
-        setResults(prev => ({ ...prev, [doc.id]: { ...prev[doc.id], quiz: q } }));
-        resetQuizAnswers();
+        await buildQuiz(doc);
       }
     } catch (err: any) {
       console.error(`${tab} generation failed:`, err);
@@ -1081,7 +931,7 @@ Marking points: ${(q.keyPoints ?? []).join(' | ')}
 Student's answer: ${answer}
 
 Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feedback": "2-4 sentences: what was correct, what is missing or wrong"}`;
-      const raw = await generate(provider, apiKey, prompt, { json: true });
+      const raw = await generate(cfg, prompt, { json: true });
       const r = parseJsonLoose<{ score: number; feedback: string }>(raw);
       const score = Math.max(0, Math.min(q.marks, Number(r.score) || 0));
       setEvals(p => ({ ...p, [idx]: { score, outOf: q.marks, feedback: r.feedback } }));
@@ -1097,7 +947,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
     setResults(prev => { const { [id]: _removed, ...rest } = prev; return rest; });
     if (selectedDocId === id) {
       setSelectedDocId(remaining[0]?.id || '');
-      setRagResult(null);
+      setRagAnswer(null);
       setTabError(null);
       resetQuizAnswers();
     }
@@ -1105,7 +955,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
 
   const selectDoc = (id: string) => {
     setSelectedDocId(id);
-    setRagResult(null);
+    setRagAnswer(null);
     setTabError(null);
     resetQuizAnswers();
   };
@@ -1139,28 +989,50 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
 
         <div className="flex items-start gap-4">
           {showKeyInput ? (
-            <div className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1.5 w-96">
               <div className="flex items-center gap-2">
                 <select
-                  value={provider}
-                  onChange={(e) => changeProvider(e.target.value as Provider)}
-                  className="bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700"
+                  value={cfg.provider}
+                  onChange={(e) => changeProvider(e.target.value as ProviderId)}
+                  className="flex-1 bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700"
                 >
-                  {(Object.keys(PROVIDERS) as Provider[]).map(p => (
-                    <option key={p} value={p}>{PROVIDERS[p].label}</option>
+                  {PROVIDER_IDS.map(id => (
+                    <option key={id} value={id}>{PROVIDERS[id].label}</option>
                   ))}
                 </select>
-                <span className="text-[10px] text-slate-500">Get a key: {PROVIDERS[provider].help}</span>
+                {cfg.provider === 'gemini' && (
+                  <select
+                    value={cfg.speed}
+                    onChange={(e) => changeSpeed(e.target.value as Speed)}
+                    title="Fast uses the quickest Gemini model first. Quality uses the smartest one first."
+                    className="bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700"
+                  >
+                    <option value="fast">Fast</option>
+                    <option value="quality">Quality</option>
+                  </select>
+                )}
               </div>
+              <p className="text-[10px] text-slate-500 leading-snug">
+                {PROVIDERS[cfg.provider].note} Get a key: {PROVIDERS[cfg.provider].keyHelp}
+              </p>
+              {cfg.provider === 'custom' && (
+                <input
+                  type="text"
+                  placeholder="Base URL, e.g. https://api.groq.com/openai/v1"
+                  value={cfg.baseUrl}
+                  onChange={(e) => updateCfg({ baseUrl: e.target.value })}
+                  className="bg-slate-100 border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none"
+                />
+              )}
               <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-300">
                 <Key className="w-4 h-4 text-slate-500 ml-2" />
                 <input
                   type="password"
-                  placeholder={PROVIDERS[provider].placeholder}
-                  value={apiKey}
-                  onChange={(e) => { setApiKey(e.target.value); setKeyStatus('none'); setKeyError(null); setKeyLog([]); }}
+                  placeholder={PROVIDERS[cfg.provider].keyPlaceholder}
+                  value={cfg.apiKey}
+                  onChange={(e) => updateCfg({ apiKey: e.target.value })}
                   onKeyDown={(e) => { if (e.key === 'Enter') testApiKey(); }}
-                  className="bg-transparent text-xs outline-none w-48"
+                  className="bg-transparent text-xs outline-none flex-1 min-w-0"
                 />
                 <button
                   onClick={testApiKey}
@@ -1175,19 +1047,32 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
                    keyStatus === 'invalid' ? 'Retry' : 'Verify Key'}
                 </button>
               </div>
+              <input
+                type="text"
+                list="ai-model-list"
+                placeholder={`Model: ${PROVIDERS[cfg.provider].defaultModel || 'automatic (recommended)'}`}
+                value={cfg.model}
+                onChange={(e) => updateCfg({ model: e.target.value })}
+                className="bg-slate-100 border border-slate-300 rounded-lg px-3 py-1.5 text-xs outline-none"
+              />
+              <datalist id="ai-model-list">
+                {modelList.map(m => <option key={m} value={m} />)}
+              </datalist>
               {keyError && (
-                <p className="text-[10px] text-red-500 max-w-sm break-words leading-snug">{keyError}</p>
+                <p className="text-[10px] text-red-500 break-words leading-snug">{keyError}</p>
               )}
               {keyLog.length > 0 && (
-                <pre className="text-[10px] leading-snug text-slate-600 bg-slate-100 border border-slate-300 rounded p-2 max-w-sm whitespace-pre-wrap break-words">{keyLog.join('\n')}</pre>
+                <pre className="text-[10px] leading-snug text-slate-600 bg-slate-100 border border-slate-300 rounded p-2 whitespace-pre-wrap break-words">{keyLog.join('\n')}</pre>
               )}
             </div>
           ) : (
             <span
               className="text-xs font-semibold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 cursor-pointer"
               onClick={() => setShowKeyInput(true)}
+              title="Click to change provider, key or model"
             >
-              <CheckCircle2 className="w-3 h-3" /> API Key Active · {PROVIDERS[provider].label.split(' (')[0]}
+              <CheckCircle2 className="w-3 h-3" /> API Key Active · {PROVIDERS[cfg.provider].label}
+              {(cfg.model.trim() || PROVIDERS[cfg.provider].defaultModel) ? ` · ${cfg.model.trim() || PROVIDERS[cfg.provider].defaultModel}` : ''}
             </span>
           )}
 
@@ -1283,27 +1168,13 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
                       </button>
                     </form>
 
-                    {ragResult && (
-                      <div className="space-y-4">
-                        <div className="p-5 bg-amber-500/10 border-l-4 border-amber-600 rounded-xl space-y-3">
-                          <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
-                            <Sparkles className="w-4 h-4 text-amber-600" /> Grounded Explanation
-                          </div>
-                          <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">{ragResult.answer}</p>
+                    {ragAnswer !== null && (
+                      <div className="p-5 bg-amber-500/10 border-l-4 border-amber-600 rounded-xl space-y-2">
+                        <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
+                          <Sparkles className="w-4 h-4 text-amber-600" /> FRIDAY
+                          {isSearching && <Clock className="w-3 h-3 animate-spin text-amber-600" />}
                         </div>
-                        {ragResult.citations.length > 0 && (
-                          <div className="space-y-2">
-                            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Source Page Citations</h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {ragResult.citations.map((c, i) => (
-                                <div key={i} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
-                                  <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[11px] font-semibold">Page {c.page}</span>
-                                  <p className="text-[11px] text-slate-600 italic">"{c.excerpt}"</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        {ragAnswer ? <Markdown text={ragAnswer} /> : <p className="text-xs text-slate-500">Reading the document...</p>}
                       </div>
                     )}
                   </div>
@@ -1311,22 +1182,26 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
 
                 {selectedDoc.status === 'Ready' && activeTab === 'summary' && (
                   <div className="max-w-4xl mx-auto">
-                    {isBusyHere('summary') ? (
-                      <LoadingPanel
-                        text="FRIDAY is reading the whole document and writing your summary..."
-                        sub={progress || (selectedDoc.textContent.length > lim.single ? 'This is a large document, so it will take a few minutes.' : 'Usually under a minute.')}
-                      />
-                    ) : errorFor('summary') ? (
-                      <ErrorPanel message={errorFor('summary')!} onRetry={() => runGeneration('summary')} />
-                    ) : docResults.summary ? (
+                    {docResults.summary ? (
                       <div>
-                        <div className="flex justify-end">
+                        <div className="flex items-center justify-between">
+                          {isBusyHere('summary')
+                            ? <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700"><Clock className="w-3.5 h-3.5 animate-spin" /> Writing...</span>
+                            : <span />}
                           <button onClick={() => runGeneration('summary')} disabled={isGenerating} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50">
                             <RefreshCw className="w-3.5 h-3.5" /> Regenerate
                           </button>
                         </div>
+                        {errorFor('summary') && <ErrorPanel message={errorFor('summary')!} onRetry={() => runGeneration('summary')} />}
                         <Markdown text={docResults.summary} />
                       </div>
+                    ) : errorFor('summary') ? (
+                      <ErrorPanel message={errorFor('summary')!} onRetry={() => runGeneration('summary')} />
+                    ) : isBusyHere('summary') ? (
+                      <LoadingPanel
+                        text="FRIDAY is reading the document..."
+                        sub={progress || 'The summary appears here as soon as it starts writing.'}
+                      />
                     ) : (
                       <p className="text-sm text-slate-500">Summary not generated yet.</p>
                     )}
@@ -1335,34 +1210,50 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
 
                 {selectedDoc.status === 'Ready' && activeTab === 'formulas' && (
                   <div className="max-w-4xl mx-auto">
-                    {isBusyHere('formulas') ? (
-                      <LoadingPanel text="Scanning the document for formulas and explaining each one..." sub={progress} />
-                    ) : errorFor('formulas') ? (
-                      <ErrorPanel message={errorFor('formulas')!} onRetry={() => runGeneration('formulas')} />
-                    ) : docResults.formulas ? (
-                      docResults.formulas.hasFormulas ? (
+                    {docResults.formulas ? (() => {
+                      const fr = docResults.formulas!;
+                      return (
                         <div className="space-y-5">
-                          <div className="flex items-center justify-between">
-                            <p className="text-xs font-semibold text-slate-600">
-                              {docResults.formulas.formulas.length} formula{docResults.formulas.formulas.length === 1 ? '' : 's'} found in "{selectedDoc.name}"
-                            </p>
-                            <button onClick={() => runGeneration('formulas')} disabled={isGenerating} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50">
-                              <RefreshCw className="w-3.5 h-3.5" /> Re-scan
-                            </button>
-                          </div>
-                          {docResults.formulas.formulas.map((f, i) => <FormulaCard key={i} f={f} index={i} />)}
+                          {fr.partial && (
+                            <div className="flex items-center gap-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                              <Clock className="w-3.5 h-3.5 animate-spin" /> {progress || 'Scanning the document for formulas...'}
+                            </div>
+                          )}
+                          {!fr.partial && (fr.failed ?? 0) > 0 && (
+                            <div className="flex items-center justify-between gap-3 text-xs text-orange-800 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+                              <span>{fr.failed} of {fr.total} parts of the document could not be scanned, so some formulas may be missing.</span>
+                              <button onClick={() => runGeneration('formulas')} disabled={isGenerating} className="font-semibold underline disabled:opacity-50">Scan again</button>
+                            </div>
+                          )}
+                          {fr.hasFormulas ? (
+                            <>
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-semibold text-slate-600">
+                                  {fr.formulas.length} formula{fr.formulas.length === 1 ? '' : 's'} found in "{selectedDoc.name}"
+                                </p>
+                                <button onClick={() => runGeneration('formulas')} disabled={isGenerating} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50">
+                                  <RefreshCw className="w-3.5 h-3.5" /> Re-scan
+                                </button>
+                              </div>
+                              {fr.formulas.map((f, i) => <FormulaCard key={i} f={f} index={i} />)}
+                            </>
+                          ) : fr.partial ? null : (
+                            <div className="max-w-xl mx-auto my-10 p-6 border border-slate-200 rounded-xl bg-slate-50 text-center space-y-2">
+                              <p className="text-sm font-bold text-slate-800">No formulas found</p>
+                              <p className="text-xs text-slate-600 leading-relaxed">
+                                There are no formulas or equations in "{selectedDoc.name}". If you expected some, the equations may be stored as images in the PDF, which text extraction cannot read.
+                              </p>
+                              <button onClick={() => runGeneration('formulas')} disabled={isGenerating} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50">
+                                <RefreshCw className="w-3.5 h-3.5" /> Scan again
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      ) : (
-                        <div className="max-w-xl mx-auto my-10 p-6 border border-slate-200 rounded-xl bg-slate-50 text-center space-y-2">
-                          <p className="text-sm font-bold text-slate-800">No formulas found</p>
-                          <p className="text-xs text-slate-600 leading-relaxed">
-                            There are no formulas or equations in "{selectedDoc.name}". If you expected some, the equations may be stored as images in the PDF, which text extraction cannot read.
-                          </p>
-                          <button onClick={() => runGeneration('formulas')} disabled={isGenerating} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 disabled:opacity-50">
-                            <RefreshCw className="w-3.5 h-3.5" /> Scan again
-                          </button>
-                        </div>
-                      )
+                      );
+                    })() : errorFor('formulas') ? (
+                      <ErrorPanel message={errorFor('formulas')!} onRetry={() => runGeneration('formulas')} />
+                    ) : isBusyHere('formulas') ? (
+                      <LoadingPanel text="Checking the document for formulas..." sub={progress} />
                     ) : (
                       <p className="text-sm text-slate-500">Formulas not generated yet.</p>
                     )}
@@ -1372,7 +1263,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
                 {selectedDoc.status === 'Ready' && activeTab === 'questions' && (
                   <div className="max-w-4xl mx-auto space-y-6">
                     {isBusyHere('quiz') ? (
-                      <LoadingPanel text="Setting your practice paper..." sub="Questions are drawn from the whole document." />
+                      <LoadingPanel text="Setting your practice paper..." sub={progress || 'Questions are drawn from the whole document.'} />
                     ) : !quiz ? (
                       <div className="space-y-5">
                         {errorFor('quiz') && <ErrorPanel message={errorFor('quiz')!} />}
@@ -1475,6 +1366,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
                           <div>
                             <h3 className="text-lg font-bold text-slate-900">Practice Paper</h3>
                             <p className="text-xs font-semibold text-amber-600">{quiz.label} · {totalMarks} marks</p>
+                            {quiz.note && <p className="text-[11px] text-orange-700 mt-0.5">{quiz.note}</p>}
                           </div>
                           <button
                             onClick={() => { setResults(prev => ({ ...prev, [selectedDocId]: { ...prev[selectedDocId], quiz: undefined } })); resetQuizAnswers(); }}
