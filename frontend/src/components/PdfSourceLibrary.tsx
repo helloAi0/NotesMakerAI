@@ -82,12 +82,29 @@ interface EvalState { loading?: boolean; score?: number; outOf?: number; feedbac
 /* ------------------------------------------------------------------ */
 
 // Tried in order. If a model is not found for your key, the next one is used.
-const MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-2.5-flash'];
+const MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 
-const SINGLE_PASS_CHARS = 300_000; // whole document sent in one request up to this size
-const CHUNK_CHARS = 200_000;       // bigger documents are processed in parts of this size
-const QA_CHARS = 250_000;
-const QUIZ_CHARS = 200_000;
+type Provider = 'gemini' | 'openrouter';
+
+const PROVIDERS: Record<Provider, { label: string; placeholder: string; help: string }> = {
+  gemini: {
+    label: 'Google Gemini',
+    placeholder: 'Paste your Gemini API key',
+    help: 'aistudio.google.com/app/apikey',
+  },
+  openrouter: {
+    label: 'OpenRouter (free models)',
+    placeholder: 'Paste your OpenRouter key (sk-or-...)',
+    help: 'openrouter.ai/keys',
+  },
+};
+
+// How much document text is sent per request. Free OpenRouter models have small context windows,
+// so documents are split into smaller parts for them.
+const LIMITS: Record<Provider, { single: number; chunk: number; qa: number; quiz: number }> = {
+  gemini: { single: 300_000, chunk: 200_000, qa: 250_000, quiz: 200_000 },
+  openrouter: { single: 60_000, chunk: 60_000, qa: 60_000, quiz: 60_000 },
+};
 
 const AUDIENCES: { id: Audience; label: string }[] = [
   { id: 'school', label: 'School' },
@@ -167,6 +184,12 @@ function parseApiError(e: any): ApiErrInfo {
 
 function friendlyError(e: any): string {
   const { status, reason, message } = parseApiError(e);
+  if (/data policy/i.test(message)) {
+    return (
+      'OpenRouter blocked the free models because of your privacy settings. Open openrouter.ai/settings/privacy and ' +
+      'allow free models (the exact wording of the option may differ), then retry.'
+    );
+  }
   if (reason === 'ACCESS_TOKEN_TYPE_UNSUPPORTED') {
     return (
       'Google refuses this key type for the Gemini API (401 ACCESS_TOKEN_TYPE_UNSUPPORTED), on every login method the ' +
@@ -177,16 +200,17 @@ function friendlyError(e: any): string {
     );
   }
   if (status === 401 || status === 403) {
-    return `Google rejected the API key (${status}): ${message}. Check that it is copied completely and is enabled for the Gemini API.`;
+    return `The AI provider rejected the API key (${status}): ${message}. Check that the key is copied completely and matches the provider selected at the top right.`;
   }
+  if (status === 402) return 'The provider says your account balance is negative (402). Add credits or switch provider.';
   if (status === 429) return 'Rate limit or quota reached. Wait a minute and try again (free-tier keys have low limits).';
-  if (status === 503 || status === 500) return 'Gemini is overloaded right now. Please try again in a moment.';
-  if (status === 400) return `Gemini rejected the request (400): ${message}`;
+  if (status === 503 || status === 500) return 'The AI service is overloaded right now. Please try again in a moment.';
+  if (status === 400) return `The AI service rejected the request (400): ${message}`;
   if (/timed out/i.test(message)) {
-    return `${message}. Google never answered: check your internet connection, turn off any VPN or ad-blocker for localhost, and retry.`;
+    return `${message}. The AI service never answered: check your internet connection, turn off any VPN or ad-blocker for localhost, and retry. If it keeps happening, switch provider at the top right.`;
   }
   if (/failed to fetch|networkerror|load failed/i.test(message)) {
-    return "The browser could not reach Google's servers (network, VPN, firewall or ad-blocker). Turn off any VPN and retry.";
+    return 'The browser could not reach the AI service (network, VPN, firewall or ad-blocker). Turn off any VPN and retry.';
   }
   return message;
 }
@@ -238,10 +262,12 @@ async function restGenerate(
   return text;
 }
 
-async function generate(
+interface GenOpts { json?: boolean; timeoutMs?: number; retries?: number; maxModels?: number; log?: (line: string) => void }
+
+async function generateGemini(
   apiKey: string,
   prompt: string,
-  opts: { json?: boolean; timeoutMs?: number; retries?: number; log?: (line: string) => void } = {},
+  opts: GenOpts = {},
 ): Promise<string> {
   const { json = false, timeoutMs = 180_000, retries = 2, log } = opts;
   const key = apiKey.trim();
@@ -250,7 +276,7 @@ async function generate(
   let lastErr: unknown = new Error('No Gemini model could be reached.');
   let authErr: unknown;
 
-  models: for (const model of MODELS) {
+  models: for (const model of MODELS.slice(0, opts.maxModels ?? MODELS.length)) {
     const modes: AuthMode[] = workingAuth ? [workingAuth] : AUTH_ORDER;
     for (const mode of modes) {
       for (let attempt = 0; attempt <= retries; attempt++) {
@@ -266,6 +292,7 @@ async function generate(
           const { status, reason, message } = parseApiError(e);
           log?.(`FAIL  ${AUTH_LABEL[mode]} | ${model} | ${status ? `HTTP ${status}${reason ? ' ' + reason : ''}` : message.slice(0, 120)} | ${Date.now() - started} ms`);
           if (status === 404) continue models;            // model not available: try the next model
+          if (!status && /timed out/i.test(message)) continue models; // model never answered: try the next model
           if (status === 401 || status === 403) {         // login rejected: try the next login method
             if (authErr === undefined) authErr = e;
             break;
@@ -284,6 +311,93 @@ async function generate(
   throw lastErr;
 }
 
+
+/* ---------- OpenRouter (free models) ---------- */
+
+const OPENROUTER = 'https://openrouter.ai/api/v1';
+let openRouterFree: string[] | null = null;
+
+/** Free models currently offered by OpenRouter, biggest context window first. */
+async function openRouterModels(): Promise<string[]> {
+  if (openRouterFree) return openRouterFree;
+  const controller = new AbortController();
+  const res = await withTimeout(fetch(`${OPENROUTER}/models`, { signal: controller.signal }), 15_000, controller);
+  if (!res.ok) return ['openrouter/free'];
+  const data: any = await res.json();
+  const list: any[] = Array.isArray(data?.data) ? data.data : [];
+  const free = list
+    .filter(m => typeof m?.id === 'string' && m.id.endsWith(':free'))
+    .filter(m => (m?.architecture?.output_modalities ?? ['text']).includes('text'))
+    .filter(m => (m?.context_length ?? 0) >= 32_000)
+    .sort((a, b) => (b.context_length ?? 0) - (a.context_length ?? 0))
+    .map(m => m.id as string);
+  openRouterFree = ['openrouter/free', ...free].filter((id, i, all) => all.indexOf(id) === i);
+  return openRouterFree;
+}
+
+async function openRouterChat(key: string, model: string, prompt: string, json: boolean, signal: AbortSignal): Promise<string> {
+  const messages: { role: string; content: string }[] = [];
+  if (json) messages.push({ role: 'system', content: 'Respond with valid JSON only: no markdown fences and no commentary.' });
+  messages.push({ role: 'user', content: prompt });
+
+  const res = await fetch(`${OPENROUTER}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    signal,
+    body: JSON.stringify({ model, messages }),
+  });
+  const raw = await res.text();
+  let data: any = null;
+  try { data = JSON.parse(raw); } catch { /* not JSON */ }
+
+  // OpenRouter sometimes reports upstream failures inside an HTTP 200 response.
+  if (!res.ok || data?.error) {
+    const err = data?.error;
+    throw new ApiError(
+      res.ok ? Number(err?.code) || 502 : res.status,
+      typeof err?.message === 'string' ? err.message : raw.slice(0, 300),
+      undefined,
+      'bearer',
+    );
+  }
+  const text = data?.choices?.[0]?.message?.content;
+  if (typeof text !== 'string' || !text.trim()) {
+    throw new Error(`The AI returned no text (${data?.choices?.[0]?.finish_reason ?? 'empty'}). Please retry.`);
+  }
+  return text;
+}
+
+async function generateOpenRouter(apiKey: string, prompt: string, opts: GenOpts = {}): Promise<string> {
+  const { json = false, timeoutMs = 180_000, retries = 2, log } = opts;
+  const key = apiKey.trim();
+  const models = (await openRouterModels()).slice(0, (opts.maxModels ?? 6) + 1);
+  let lastErr: unknown = new Error('No free OpenRouter model could be reached.');
+
+  for (let round = 0; round <= retries; round++) {
+    for (const model of models) {
+      const controller = new AbortController();
+      const started = Date.now();
+      try {
+        const text = await withTimeout(openRouterChat(key, model, prompt, json, controller.signal), timeoutMs, controller);
+        log?.(`OK    OpenRouter | ${model} | ${Date.now() - started} ms`);
+        return text;
+      } catch (e) {
+        lastErr = e;
+        const { status, message } = parseApiError(e);
+        log?.(`FAIL  OpenRouter | ${model} | ${status ? `HTTP ${status}` : message.slice(0, 120)} | ${Date.now() - started} ms`);
+        if (status === 401 || status === 402 || status === 403) throw e; // key or credit problem: other models will not help
+        // anything else: try the next free model
+      }
+    }
+    if (round < retries) await sleep(8000 * (round + 1)); // every model busy: wait, then go round again
+  }
+  throw lastErr;
+}
+
+/** Sends one prompt to the selected provider and returns the text reply. */
+function generate(provider: Provider, apiKey: string, prompt: string, opts: GenOpts = {}): Promise<string> {
+  return provider === 'openrouter' ? generateOpenRouter(apiKey, prompt, opts) : generateGemini(apiKey, prompt, opts);
+}
 
 function parseJsonLoose<T>(s: string): T {
   const cleaned = s.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
@@ -682,7 +796,10 @@ function FormulaCard({ f, index }: { f: FormulaItem; index: number }) {
 export default function PdfSourceLibrary() {
   // The key can also come from a .env.local file: VITE_GEMINI_API_KEY=your_key
   const envKey: string = (import.meta as any).env?.VITE_GEMINI_API_KEY || '';
-  const [apiKey, setApiKey] = useState<string>(() => localStorage.getItem('gemini_api_key') || envKey);
+  const storedKey = (p: Provider) =>
+    localStorage.getItem(`ai_key_${p}`) || (p === 'gemini' ? localStorage.getItem('gemini_api_key') || envKey : '');
+  const [provider, setProvider] = useState<Provider>(() => (localStorage.getItem('ai_provider') === 'openrouter' ? 'openrouter' : 'gemini'));
+  const [apiKey, setApiKey] = useState<string>(() => storedKey(provider));
   const [showKeyInput, setShowKeyInput] = useState(!apiKey);
   const [keyStatus, setKeyStatus] = useState<'none' | 'testing' | 'valid' | 'invalid'>('none');
   const [keyError, setKeyError] = useState<string | null>(null);
@@ -718,6 +835,7 @@ export default function PdfSourceLibrary() {
   const [evals, setEvals] = useState<Record<number, EvalState>>({});
 
   const selectedDoc = documents.find(d => d.id === selectedDocId);
+  const lim = LIMITS[provider];
   const docResults: DocResults = (selectedDocId && results[selectedDocId]) || {};
   const quiz = docResults.quiz;
 
@@ -725,25 +843,34 @@ export default function PdfSourceLibrary() {
 
   /* ---------------- API key ---------------- */
 
+  const changeProvider = (p: Provider) => {
+    setProvider(p);
+    localStorage.setItem('ai_provider', p);
+    setApiKey(storedKey(p));
+    setKeyStatus('none');
+    setKeyError(null);
+    setKeyLog([]);
+  };
+
   const testApiKey = async () => {
     const key = apiKey.trim();
-    if (!key) { setKeyError('Paste your Gemini API key first.'); return; }
+    if (!key) { setKeyError('Paste your API key first.'); return; }
     setKeyStatus('testing');
     setKeyError(null);
 
-    // Every attempt is written to this log so you can see exactly what Google answered.
+    // Every attempt is written to this log so you can see exactly what the service answered.
     const lines: string[] = [];
     const log = (line: string) => {
       lines.push(line);
-      console.log('[Gemini key test]', line);
+      console.log('[API key test]', line);
       setKeyLog([...lines]);
     };
     setKeyLog([]);
 
     try {
-      await withTimeout(generate(key, 'Reply with the single word: OK', { timeoutMs: 20_000, retries: 0, log }), 60_000);
+      await withTimeout(generate(provider, key, 'Reply with the single word: OK', { timeoutMs: 25_000, retries: 0, maxModels: 3, log }), 120_000);
       setKeyStatus('valid');
-      localStorage.setItem('gemini_api_key', key);
+      localStorage.setItem(`ai_key_${provider}`, key);
       setTimeout(() => setShowKeyInput(false), 2500);
     } catch (e: any) {
       console.error('Key test failed:', e);
@@ -807,13 +934,13 @@ export default function PdfSourceLibrary() {
   const handleRagSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ragQuery.trim() || !selectedDoc || selectedDoc.status !== 'Ready') return;
-    if (!apiKey.trim()) { setRagResult({ answer: 'Add and verify your Gemini API key (top right) first.', citations: [] }); setShowKeyInput(true); return; }
+    if (!apiKey.trim()) { setRagResult({ answer: 'Add and verify your API key (top right) first.', citations: [] }); setShowKeyInput(true); return; }
 
     setIsSearching(true);
     setRagResult(null);
 
     try {
-      const context = selectRelevantPages(selectedDoc.pageTexts, ragQuery, QA_CHARS);
+      const context = selectRelevantPages(selectedDoc.pageTexts, ragQuery, lim.qa);
       const prompt = `
 You are FRIDAY, an elite educational AI.
 Answer the user's question using ONLY the document text below.
@@ -828,7 +955,7 @@ USER QUESTION: ${ragQuery}
 Return ONLY a JSON object exactly like this:
 {"answer": "Your detailed answer.", "citations": [{"page": 1, "excerpt": "short exact quote from the text"}]}`;
 
-      const response = await generate(apiKey, prompt, { json: true });
+      const response = await generate(provider, apiKey, prompt, { json: true });
       const parsed = parseJsonLoose<{ answer: string; citations?: { page: number; excerpt: string }[] }>(response);
       setRagResult({ answer: parsed.answer ?? '', citations: parsed.citations ?? [] });
     } catch (err: any) {
@@ -841,25 +968,25 @@ Return ONLY a JSON object exactly like this:
   /* ---------------- Summary / Formulas / Quiz ---------------- */
 
   const buildSummary = async (doc: DocumentItem): Promise<string> => {
-    if (doc.textContent.length <= SINGLE_PASS_CHARS) {
-      return generate(apiKey, summaryPrompt(doc.name, doc.pages, doc.textContent));
+    if (doc.textContent.length <= lim.single) {
+      return generate(provider, apiKey, summaryPrompt(doc.name, doc.pages, doc.textContent));
     }
-    const chunks = chunkPages(doc.pageTexts, CHUNK_CHARS);
+    const chunks = chunkPages(doc.pageTexts, lim.chunk);
     const notes: string[] = [];
     for (let i = 0; i < chunks.length; i++) {
       setProgress(`Reading part ${i + 1} of ${chunks.length} (pages ${chunks[i].from}-${chunks[i].to})...`);
-      notes.push(await generate(apiKey, notesPrompt(doc.name, chunks[i].from, chunks[i].to, chunks[i].text)));
+      notes.push(await generate(provider, apiKey, notesPrompt(doc.name, chunks[i].from, chunks[i].to, chunks[i].text)));
     }
     setProgress('Combining everything into the final summary...');
-    return generate(apiKey, summaryFromNotesPrompt(doc.name, doc.pages, notes.join('\n\n')));
+    return generate(provider, apiKey, summaryFromNotesPrompt(doc.name, doc.pages, notes.join('\n\n')));
   };
 
   const buildFormulas = async (doc: DocumentItem): Promise<FormulaResult> => {
-    const chunks = chunkPages(doc.pageTexts, doc.textContent.length <= SINGLE_PASS_CHARS ? SINGLE_PASS_CHARS : CHUNK_CHARS);
+    const chunks = chunkPages(doc.pageTexts, doc.textContent.length <= lim.single ? lim.single : lim.chunk);
     const all: FormulaItem[] = [];
     for (let i = 0; i < chunks.length; i++) {
       if (chunks.length > 1) setProgress(`Scanning part ${i + 1} of ${chunks.length} (pages ${chunks[i].from}-${chunks[i].to})...`);
-      const raw = await generate(apiKey, formulaPrompt(doc.name, chunks[i].from, chunks[i].to, chunks[i].text), { json: true });
+      const raw = await generate(provider, apiKey, formulaPrompt(doc.name, chunks[i].from, chunks[i].to, chunks[i].text), { json: true });
       const parsed = parseJsonLoose<{ formulas?: FormulaItem[] } | FormulaItem[]>(raw);
       const list = Array.isArray(parsed) ? parsed : parsed.formulas ?? [];
       all.push(...list.filter(f => f && typeof f.latex === 'string' && f.latex.trim()));
@@ -876,8 +1003,8 @@ Return ONLY a JSON object exactly like this:
 
   const buildQuiz = async (doc: DocumentItem): Promise<QuizSet> => {
     const cfg: QuizConfig = { ...qCfg, count: Math.min(30, Math.max(1, Math.round(qCfg.count || 10))) };
-    const context = spreadSample(doc.pageTexts, QUIZ_CHARS);
-    const raw = await generate(apiKey, quizPrompt(doc.name, cfg, context), { json: true, retries: 2 });
+    const context = spreadSample(doc.pageTexts, lim.quiz);
+    const raw = await generate(provider, apiKey, quizPrompt(doc.name, cfg, context), { json: true, retries: 2 });
     const parsed = parseJsonLoose<QuizQuestion[] | { questions: QuizQuestion[] }>(raw);
     const list = Array.isArray(parsed) ? parsed : parsed.questions ?? [];
 
@@ -900,7 +1027,7 @@ Return ONLY a JSON object exactly like this:
     const doc = selectedDoc;
     if (!doc || doc.status !== 'Ready') return;
     if (!apiKey.trim()) {
-      setTabError({ tab, message: 'Add and verify your Gemini API key (top right) first.' });
+      setTabError({ tab, message: 'Add and verify your API key (top right) first.' });
       setShowKeyInput(true);
       return;
     }
@@ -954,7 +1081,7 @@ Marking points: ${(q.keyPoints ?? []).join(' | ')}
 Student's answer: ${answer}
 
 Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feedback": "2-4 sentences: what was correct, what is missing or wrong"}`;
-      const raw = await generate(apiKey, prompt, { json: true });
+      const raw = await generate(provider, apiKey, prompt, { json: true });
       const r = parseJsonLoose<{ score: number; feedback: string }>(raw);
       const score = Math.max(0, Math.min(q.marks, Number(r.score) || 0));
       setEvals(p => ({ ...p, [idx]: { score, outOf: q.marks, feedback: r.feedback } }));
@@ -1003,7 +1130,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
       <div className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between shrink-0">
         <div>
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-amber-600" /> PDF Intelligence (Powered by Gemini)
+            <BookOpen className="w-5 h-5 text-amber-600" /> PDF Intelligence (Powered by {PROVIDERS[provider].label})
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
             Upload real PDFs. Extract text. Generate grounded summaries, formulas, and interactive exams.
@@ -1013,11 +1140,23 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
         <div className="flex items-start gap-4">
           {showKeyInput ? (
             <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <select
+                  value={provider}
+                  onChange={(e) => changeProvider(e.target.value as Provider)}
+                  className="bg-slate-100 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-700"
+                >
+                  {(Object.keys(PROVIDERS) as Provider[]).map(p => (
+                    <option key={p} value={p}>{PROVIDERS[p].label}</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-slate-500">Get a key: {PROVIDERS[provider].help}</span>
+              </div>
               <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-300">
                 <Key className="w-4 h-4 text-slate-500 ml-2" />
                 <input
                   type="password"
-                  placeholder="Paste your Gemini API key"
+                  placeholder={PROVIDERS[provider].placeholder}
                   value={apiKey}
                   onChange={(e) => { setApiKey(e.target.value); setKeyStatus('none'); setKeyError(null); setKeyLog([]); }}
                   onKeyDown={(e) => { if (e.key === 'Enter') testApiKey(); }}
@@ -1048,7 +1187,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
               className="text-xs font-semibold text-emerald-600 flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 cursor-pointer"
               onClick={() => setShowKeyInput(true)}
             >
-              <CheckCircle2 className="w-3 h-3" /> API Key Active
+              <CheckCircle2 className="w-3 h-3" /> API Key Active · {PROVIDERS[provider].label.split(' (')[0]}
             </span>
           )}
 
@@ -1175,7 +1314,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
                     {isBusyHere('summary') ? (
                       <LoadingPanel
                         text="FRIDAY is reading the whole document and writing your summary..."
-                        sub={progress || (selectedDoc.textContent.length > SINGLE_PASS_CHARS ? 'This is a large document, so it will take a few minutes.' : 'Usually under a minute.')}
+                        sub={progress || (selectedDoc.textContent.length > lim.single ? 'This is a large document, so it will take a few minutes.' : 'Usually under a minute.')}
                       />
                     ) : errorFor('summary') ? (
                       <ErrorPanel message={errorFor('summary')!} onRetry={() => runGeneration('summary')} />
