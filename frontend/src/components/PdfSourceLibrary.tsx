@@ -4,7 +4,8 @@ import {
   Clock, Sparkles, Send, Trash2, Key, Check, X 
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+// 1. SWITCHED TO NEW SDK
+import { GoogleGenAI } from '@google/genai';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
@@ -43,17 +44,19 @@ export default function PdfSourceLibrary() {
 
   const selectedDoc = documents.find(d => d.id === selectedDocId);
 
+  // 2. NEW MODEL CONSTANT
+  const MODEL = 'gemini-3.8-flash';
+
   const testApiKey = async () => {
     if (!apiKey) return;
     setKeyStatus('testing');
     setKeyError(null);
 
     try {
-      const genAI = new GoogleGenerativeAI(apiKey.trim());
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      
-      const result = await model.generateContent("Hello");
-      console.log("Success:", result.response.text());
+      // 3. UPDATED TO NEW SDK SYNTAX
+      const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
+      const response = await ai.models.generateContent({ model: MODEL, contents: 'Hello' });
+      console.log('Success:', response.text);
       
       setKeyStatus('valid');
       localStorage.setItem('gemini_api_key', apiKey.trim());
@@ -110,17 +113,17 @@ export default function PdfSourceLibrary() {
     }
   };
 
+  // 4. UPDATED callGemini FUNCTION
   const callGemini = async (prompt: string, isJson = false) => {
-    if (!apiKey) throw new Error("API Key missing");
-    
-    const genAI = new GoogleGenerativeAI(apiKey.trim());
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
-      generationConfig: isJson ? { responseMimeType: "application/json" } : undefined
+    if (!apiKey) throw new Error('API Key missing');
+
+    const ai = new GoogleGenAI({ apiKey: apiKey.trim() });
+    const response = await ai.models.generateContent({
+      model: MODEL,
+      contents: prompt,
+      config: isJson ? { responseMimeType: 'application/json' } : undefined,
     });
-    
-    const result = await model.generateContent(prompt);
-    return result.response.text();
+    return response.text ?? '';
   };
 
   const handleRagSearch = async (e: React.FormEvent) => {
