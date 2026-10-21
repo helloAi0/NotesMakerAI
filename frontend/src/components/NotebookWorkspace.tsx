@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 // IMPORT THE NEW SIMULATION COMPONENT
-import InteractiveVisualizer from './InteractiveVisualizer';
+import VisualsStudio from './VisualsStudio';
 
 interface NotebookWorkspaceProps {
   notebookData?: {
@@ -531,7 +531,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
         {/* RENDER THE ISOLATED VISUALIZER COMPONENT */}
         {activeTab === 'Visuals' ? (
           <div className="w-full flex justify-center pt-8">
-             <InteractiveVisualizer />
+             <VisualsStudio />
           </div>
         ) : (
           /* Normal Notebook Page View */

@@ -2,13 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, ArrowLeft, ExternalLink, Maximize2, Atom, FlaskConical, Dna, Sigma, Globe, Activity, Clock, Sparkles,
 } from 'lucide-react';
-import InteractiveVisualizer from './InteractiveVisualizer';
+import SimPlayer from './SimPlayer';
+import SimThumb from './SimThumb';
+import { SIMS, SIM_SUBJECTS } from '../sims/registry';
+import type { AnySim, SimSubject } from '../sims/types';
 import {
   PHET_SIMS, SUBJECTS, PHET_HOME, simRunUrl, simPageUrl, simLicenseUrl, simThumbUrl,
 } from '../data/phetSims';
 import type { PhetSim, Subject } from '../data/phetSims';
 
-const BUILTIN = 'built-in-projectile';
 const RECENT_KEY = 'phet_recent';
 
 const SUBJECT_ICON: Record<Subject, typeof Atom> = {
@@ -139,10 +141,10 @@ function PhetViewer({ sim, onBack }: { sim: PhetSim; onBack: () => void }) {
   );
 }
 
-export default function VisualsStudio() {
+function PhetLibrary() {
   const [query, setQuery] = useState('');
   const [subject, setSubject] = useState<'All' | Subject>('All');
-  const [open, setOpen] = useState<string | null>(null); // a slug, BUILTIN, or null for the catalogue
+  const [open, setOpen] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>(readRecent);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -161,36 +163,28 @@ export default function VisualsStudio() {
 
   const openSim = (slug: string) => {
     setOpen(slug);
-    if (slug === BUILTIN) return;
     const next = [slug, ...recent.filter(r => r !== slug)].slice(0, 6);
     setRecent(next);
     try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
   };
 
-  const openedSim = open && open !== BUILTIN ? bySlug.get(open) : undefined;
+  const openedSim = open ? bySlug.get(open) : undefined;
   const recentSims = recent.map(r => bySlug.get(r)).filter((s): s is PhetSim => !!s);
   const filtering = query.trim() !== '' || subject !== 'All';
 
   return (
     <div ref={rootRef} className="w-full max-w-6xl mx-auto space-y-5">
-      {open === BUILTIN ? (
-        <div className="space-y-3">
-          <button onClick={() => setOpen(null)} className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:border-slate-400 px-3 py-1.5 rounded-lg">
-            <ArrowLeft className="w-3.5 h-3.5" /> All simulations
-          </button>
-          <div className="flex justify-center"><InteractiveVisualizer /></div>
-        </div>
-      ) : openedSim ? (
+      {openedSim ? (
         <PhetViewer sim={openedSim} onBack={() => setOpen(null)} />
       ) : (
         <>
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-amber-600" /> Interactive Visual Learning Studio
+                <Globe className="w-5 h-5 text-amber-600" /> PhET simulation library
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                {PHET_SIMS.length} interactive simulations from PhET, plus our own projectile simulator. Pick one to explore it live.
+                {PHET_SIMS.length} official simulations from PhET, embedded live. They need an internet connection.
               </p>
             </div>
             <div className="relative w-full sm:w-72">
@@ -224,20 +218,6 @@ export default function VisualsStudio() {
             })}
           </div>
 
-          {!filtering && (
-            <button
-              type="button"
-              onClick={() => openSim(BUILTIN)}
-              className="w-full text-left flex items-center gap-3 bg-white border border-slate-200 hover:border-amber-500 rounded-xl p-3 shadow-sm transition-all"
-            >
-              <span className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/25 to-indigo-500/10 flex items-center justify-center"><Activity className="w-5 h-5 text-blue-300" /></span>
-              <span>
-                <span className="block text-xs font-bold text-slate-800">Projectile Motion Simulator (built in)</span>
-                <span className="block text-[11px] text-slate-500">Our own kinematics simulator. Works offline.</span>
-              </span>
-            </button>
-          )}
-
           {!filtering && recentSims.length > 0 && (
             <div className="space-y-2">
               <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Continue exploring</h3>
@@ -269,6 +249,85 @@ export default function VisualsStudio() {
           </p>
         </>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Original simulations                                               */
+/* ------------------------------------------------------------------ */
+
+function OriginalLibrary() {
+  const [query, setQuery] = useState('');
+  const [subject, setSubject] = useState<'All' | SimSubject>('All');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { rootRef.current?.scrollIntoView({ block: 'start' }); }, [openId]);
+
+  const opened: AnySim | undefined = SIMS.find(x => x.id === openId);
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return SIMS.filter(x => (subject === 'All' || x.subject === subject) && (!q || x.title.toLowerCase().includes(q) || x.blurb.toLowerCase().includes(q) || x.subject.toLowerCase().includes(q)));
+  }, [query, subject]);
+
+  if (opened) return <div ref={rootRef}><SimPlayer key={opened.id} sim={opened} onBack={() => setOpenId(null)} /></div>;
+
+  return (
+    <div ref={rootRef} className="space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Sparkles className="w-5 h-5 text-amber-600" /> Notes Maker simulations</h2>
+          <p className="text-xs text-slate-500 mt-0.5 max-w-xl">
+            {SIMS.length} simulations built for this app. Each has live equations, a data log, drag-and-drop where it makes sense, and an AI tutor that sees your current settings. They run offline.
+          </p>
+        </div>
+        <div className="relative w-full sm:w-72">
+          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+          <input type="text" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search: waves, orbit, pH, regression..." className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500" />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {(['All', ...SIM_SUBJECTS] as const).map(sj => {
+          const Icon = sj === 'All' ? Activity : SUBJECT_ICON[sj];
+          const count = sj === 'All' ? SIMS.length : SIMS.filter(x => x.subject === sj).length;
+          return (
+            <button key={sj} type="button" onClick={() => setSubject(sj)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${subject === sj ? 'border-amber-500 bg-amber-50 text-amber-900 shadow-sm' : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'}`}>
+              <Icon className="w-3.5 h-3.5" /> {sj} <span className="text-[10px] font-normal opacity-70">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+      {results.length ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {results.map(x => (
+            <button key={x.id} type="button" onClick={() => setOpenId(x.id)} className="group text-left bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md hover:border-amber-500 transition-all focus:outline-none focus:ring-2 focus:ring-amber-500">
+              <SimThumb sim={x} />
+              <div className="p-3">
+                <div className="flex items-center justify-between gap-2"><p className="text-sm font-bold text-slate-800">{x.title}</p><span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded shrink-0">{x.subject}</span></div>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed line-clamp-3">{x.blurb}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="p-8 text-center text-xs text-slate-500 border border-dashed border-slate-300 rounded-xl">No simulation matches "{query}".</div>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+export default function VisualsStudio() {
+  const [tab, setTab] = useState<'original' | 'phet'>('original');
+  return (
+    <div className="w-full max-w-6xl mx-auto space-y-4">
+      <div className="inline-flex p-1 rounded-xl bg-slate-100 border border-slate-200">
+        {([['original', `Our simulations (${SIMS.length})`], ['phet', `PhET library (${PHET_SIMS.length})`]] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setTab(k)} className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${tab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>
+        ))}
+      </div>
+      {tab === 'original' ? <OriginalLibrary /> : <PhetLibrary />}
     </div>
   );
 }
