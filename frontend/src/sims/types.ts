@@ -5,7 +5,32 @@
 /*  (play/pause, speed, data log, equations, AI tutor).                */
 /* ------------------------------------------------------------------ */
 
-export type SimSubject = 'Physics' | 'Chemistry' | 'Biology' | 'Math' | 'Earth Science';
+export type SimSubject =
+  | 'Physics'
+  | 'Chemistry'
+  | 'Biology'
+  | 'Math'
+  | 'Earth Science'
+  | 'Electronics'
+  | 'Robotics'
+  | 'Computer Science';
+
+export type EducationLevel =
+  | 'Class 8'
+  | 'Class 9'
+  | 'Class 10'
+  | 'Class 11'
+  | 'Class 12'
+  | 'B.Tech'
+  | 'B.Sc'
+  | 'BBA'
+  | 'BCA'
+  | 'M.Tech'
+  | 'M.Sc';
+
+export type EducationCategory = 'All' | 'School' | 'Undergraduate' | 'Postgraduate';
+
+export type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced';
 
 export type ParamValue = number | string | boolean;
 export type Values = Record<string, ParamValue>;
@@ -27,10 +52,53 @@ export interface Readout { label: string; value: number | string; unit?: string;
 
 export interface PointerEvt { kind: 'down' | 'move' | 'up'; x: number; y: number; w: number; h: number }
 
+export type SimStatus = 'active' | 'interactive_derivation' | 'planned';
+
+export interface DerivationStep {
+  stepNumber: number;
+  title: string;
+  math: string; // LaTeX
+  explanation: string;
+  justification?: string;
+  intermediateResult?: string;
+  highlightKey?: string; // used to link to region of animation
+}
+
+export interface DerivationPlan {
+  targetEquation: string;
+  problemStatement: string;
+  assumptions: string[];
+  variableDefinitions: { symbol: string; meaning: string; unit?: string }[];
+  startingPrinciple: string;
+  steps: DerivationStep[];
+  finalResult: string;
+  dimensionalCheck?: string;
+  physicalInterpretation?: string;
+}
+
 export interface SimDef<S> {
   id: string;
   title: string;
   subject: SimSubject;
+  status?: SimStatus;
+  derivation?: DerivationPlan;
+  /** Curriculum category e.g. 'Kinematics', 'Circuits', 'Robotics', 'Thermodynamics' */
+  category?: string;
+  /** Supported education levels */
+  educationLevels?: EducationLevel[];
+  /** Difficulty level */
+  difficulty?: Difficulty;
+  /** Subject topic and subtopic */
+  topic?: string;
+  subtopic?: string;
+  /** Explicit learning objectives for students */
+  learningObjectives?: string[];
+  /** Known assumptions & scientific model limitations */
+  assumptions?: string[];
+  /** Whether canvas snapshot capture is supported (default true) */
+  supportsSnapshot?: boolean;
+  /** Whether saved parameters can be restored interactively (default true) */
+  supportsRestore?: boolean;
   /** One or two sentences shown on the card and above the simulation. */
   blurb: string;
   /** Background for the AI tutor: what the simulation models and what is worth exploring. */

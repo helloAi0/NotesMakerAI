@@ -31,6 +31,22 @@ function vacRange(v: Record<string, number | string | boolean>) {
 
 export const projectile = defineSim<PS>({
   id: 'projectile', title: 'Projectile Lab', subject: 'Physics',
+  category: 'Kinematics & Mechanics',
+  educationLevels: ['Class 9', 'Class 11', 'Class 12', 'B.Tech', 'B.Sc'],
+  difficulty: 'Intermediate',
+  topic: '2D Motion',
+  subtopic: 'Projectile Motion & Drag',
+  learningObjectives: [
+    'Analyze independent horizontal and vertical velocity components under gravity.',
+    'Determine the launch angle that maximizes horizontal range (45° in vacuum vs <45° with drag).',
+    'Compare ideal vacuum parabolas with real drag effects across different planet gravities.',
+  ],
+  assumptions: [
+    'Uniform gravitational field g constant throughout flight.',
+    'Quadratic fluid resistance model F_drag = -c|v|v.',
+  ],
+  supportsSnapshot: true,
+  supportsRestore: true,
   blurb: 'Fire a cannon on any planet, add air drag and compare with the ideal parabola. Every shot leaves a ghost path so you can compare angles.',
   hint: 'Projectile motion with optional quadratic air drag F=-c|v|v and selectable gravity. Without drag the 45 degree angle maximises range from ground level; with drag the best angle drops below 45 degrees. Compare ghost paths.',
   params: [

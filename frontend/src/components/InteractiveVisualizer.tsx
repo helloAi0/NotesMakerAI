@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Play, Pause, RotateCcw, Sliders, Activity, Info } from 'lucide-react';
 
 export default function InteractiveVisualizer() {

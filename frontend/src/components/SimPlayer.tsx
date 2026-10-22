@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Pause, Play, RotateCcw, StepForward, Camera, Download, Sparkles, Send, Table2, Loader2 } from 'lucide-react';
+import {
+  ArrowLeft, Pause, Play, RotateCcw, StepForward, Camera, Download,
+  Sparkles, Send, Table2, Loader2, BookOpen, ChevronRight, Info, CheckCircle2, Layers
+} from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import type { AnySim, Readout, Values } from '../sims/types';
 import { defaultsOf } from '../sims/types';
 import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../lib/aiClient';
 import MarkdownView from './MarkdownView';
+import AddToNotebookDialog from './AddToNotebookDialog';
+import DerivationViewer from './DerivationViewer';
 
 const fmtVal = (r: Readout) => {
   if (typeof r.value === 'string') return r.value;
@@ -24,23 +29,59 @@ function Tex({ src }: { src: string }) {
 
 interface Row { t: number; vals: Readout[] }
 
-export default function SimPlayer({ sim, onBack }: { sim: AnySim; onBack: () => void }) {
+export interface SimPlayerProps {
+  sim: AnySim;
+  onBack: () => void;
+  initialValues?: Values;
+  notebookContext?: {
+    notebookTitle?: string;
+    pageNumber?: number;
+    onBackToNotebook?: () => void;
+  };
+}
+
+export default function SimPlayer({ sim, onBack, initialValues, notebookContext }: SimPlayerProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const cvRef = useRef<HTMLCanvasElement>(null);
   const sizeRef = useRef({ w: 700, h: 440 });
   const stateRef = useRef<unknown>(null);
-  const valsRef = useRef<Values>(defaultsOf(sim.params));
+  
+  const mergedDefaults = useMemo(() => {
+    const def = defaultsOf(sim.params);
+    return initialValues ? { ...def, ...initialValues } : def;
+  }, [sim, initialValues]);
+
+  const valsRef = useRef<Values>(mergedDefaults);
   const playRef = useRef(true);
   const speedRef = useRef(1);
   const simTime = useRef(0);
 
-  const [vals, setVals] = useState<Values>(() => defaultsOf(sim.params));
+  const [vals, setVals] = useState<Values>(mergedDefaults);
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeed] = useState(1);
   const [reads, setReads] = useState<Readout[]>([]);
   const [eqs, setEqs] = useState<string[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [showLog, setShowLog] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [snapshotUrl, setSnapshotUrl] = useState<string | undefined>(undefined);
+  const [showTheory, setShowTheory] = useState(false);
+  const [showDerivation, setShowDerivation] = useState(Boolean(sim.derivation));
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+
+  const handleDerivationAddToNotebook = (derivationText: string) => {
+    const title = notebookContext?.notebookTitle || 'Digital Notebook';
+    const page = notebookContext?.pageNumber || 1;
+    try {
+      const key = `notesmaker_text_${title}`;
+      const saved = JSON.parse(localStorage.getItem(key) || '{}');
+      const cur = saved[page] || '';
+      saved[page] = cur ? `${cur}\n\n${derivationText}` : derivationText;
+      localStorage.setItem(key, JSON.stringify(saved));
+    } catch (e) {
+      void e;
+    }
+  };
 
   const [q, setQ] = useState('');
   const [answer, setAnswer] = useState('');
@@ -54,13 +95,9 @@ export default function SimPlayer({ sim, onBack }: { sim: AnySim; onBack: () => 
 
   // reset on sim change
   useEffect(() => {
-    const d = defaultsOf(sim.params);
-    valsRef.current = d;
-    setVals(d);
-    setRows([]);
-    setAnswer('');
+    valsRef.current = mergedDefaults;
     rebuild();
-  }, [sim, rebuild]);
+  }, [mergedDefaults, rebuild]);
 
   useEffect(() => { playRef.current = playing; }, [playing]);
   useEffect(() => { speedRef.current = speed; }, [speed]);
@@ -198,18 +235,146 @@ Answer in at most 180 words, referring to the actual numbers above. Use LaTeX wi
 
   return (
     <div className="w-full">
-      <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-200 bg-white">
-          <ArrowLeft size={15} /> All simulations
+      {/* 1. Breadcrumb navigation */}
+      <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-2">
+        <button onClick={onBack} className="hover:text-amber-600 transition-colors font-medium">
+          Visuals Studio
         </button>
-        <div className="min-w-0">
-          <h2 className="text-lg font-bold text-slate-900 leading-tight">{sim.title}</h2>
-          <p className="text-xs text-slate-500">{sim.subject} · original simulation</p>
+        <ChevronRight className="w-3 h-3 text-slate-400" />
+        <span>{sim.subject}</span>
+        <ChevronRight className="w-3 h-3 text-slate-400" />
+        <span className="font-semibold text-slate-800">{sim.title}</span>
+      </div>
+
+      {/* 2. Top action navigation bar */}
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 shadow-sm transition-all"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" /> Back to Simulation Library
+          </button>
+          {notebookContext?.onBackToNotebook && (
+            <button
+              onClick={notebookContext.onBackToNotebook}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-900 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg border border-amber-300 shadow-sm transition-all"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-700" /> Back to Notebook (p. {notebookContext.pageNumber ?? 1})
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          {sim.derivation && (
+            <button
+              onClick={() => setShowDerivation(!showDerivation)}
+              className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all ${
+                showDerivation
+                  ? 'bg-amber-100 border-amber-400 text-amber-900 shadow-sm'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-amber-600" />
+              <span>{showDerivation ? 'Derivation Studio Active' : 'Show 3-Panel Derivation'}</span>
+            </button>
+          )}
+          <button
+            onClick={() => setShowTheory(!showTheory)}
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all ${
+              showTheory
+                ? 'bg-blue-50 border-blue-300 text-blue-900'
+                : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+            }`}
+          >
+            <Info className="w-3.5 h-3.5" /> Objectives & Theory
+          </button>
+          <button
+            onClick={() => {
+              const url = cvRef.current?.toDataURL('image/png');
+              setSnapshotUrl(url);
+              setShowAddModal(true);
+            }}
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 px-4 py-1.5 rounded-lg shadow-sm transition-all active:scale-95"
+          >
+            <Sparkles className="w-4 h-4" /> Add to Notebook
+          </button>
         </div>
       </div>
-      <p className="text-sm text-slate-600 mb-3 max-w-3xl">{sim.blurb}</p>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+      {/* 3. Title & metadata */}
+      <div className="flex items-center gap-2.5 flex-wrap mb-1">
+        <h2 className="text-xl font-bold text-slate-900 leading-tight">{sim.title}</h2>
+        <span className="text-[11px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+          {sim.subject}
+        </span>
+        {sim.difficulty && (
+          <span className="text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
+            {sim.difficulty}
+          </span>
+        )}
+        {sim.category && (
+          <span className="text-[11px] font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+            {sim.category}
+          </span>
+        )}
+        {sim.educationLevels && sim.educationLevels.length > 0 && (
+          <span className="text-[10px] font-normal text-slate-500">
+            Levels: {sim.educationLevels.join(', ')}
+          </span>
+        )}
+      </div>
+
+      <p className="text-xs text-slate-600 mb-3 max-w-3xl leading-relaxed">{sim.blurb}</p>
+
+      {/* Learning Objectives Drawer */}
+      {showTheory && (
+        <div className="mb-4 p-4 rounded-xl border border-blue-200 bg-blue-50/50 space-y-2 animate-in fade-in">
+          {sim.learningObjectives && sim.learningObjectives.length > 0 && (
+            <div>
+              <p className="text-xs font-bold text-blue-900 uppercase tracking-wide mb-1">Learning Objectives</p>
+              <ul className="space-y-1">
+                {sim.learningObjectives.map((obj, idx) => (
+                  <li key={idx} className="text-xs text-slate-700 flex items-start gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-600 mt-0.5 shrink-0" />
+                    <span>{obj}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {sim.assumptions && sim.assumptions.length > 0 && (
+            <div className="pt-2 border-t border-blue-200">
+              <p className="text-[11px] font-bold text-blue-900 uppercase tracking-wide mb-1">Model Assumptions & Limitations</p>
+              <ul className="list-disc list-inside text-[11px] text-slate-600 space-y-0.5">
+                {sim.assumptions.map((assump, idx) => (
+                  <li key={idx}>{assump}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 3-PART VISUAL LEARNING STUDIO LAYOUT: PANEL 1 (Derivation) - PANEL 2 (Animation Canvas) - PANEL 3 (Parameters & Measurements) */}
+      <div className={`grid gap-4 ${
+        showDerivation && sim.derivation
+          ? 'grid-cols-1 lg:grid-cols-[330px_minmax(0,1fr)_280px]'
+          : 'grid-cols-1 lg:grid-cols-[minmax(0,1fr)_300px]'
+      }`}>
+        {/* PANEL 1: Step-by-Step Mathematical Derivation Engine */}
+        {showDerivation && sim.derivation && (
+          <div className="rounded-2xl overflow-hidden border border-slate-800 shadow-xl bg-slate-900 min-h-[580px] max-h-[780px] flex flex-col">
+            <DerivationViewer
+              plan={sim.derivation}
+              activeStepIndex={activeStepIndex}
+              onStepChange={setActiveStepIndex}
+              onAddToNotebook={handleDerivationAddToNotebook}
+            />
+          </div>
+        )}
+
+        {/* PANEL 2: Interactive Animation Canvas & Controls */}
         <div className="min-w-0">
           <div ref={wrapRef} className="rounded-xl overflow-hidden border border-slate-200 bg-slate-950">
             <canvas
@@ -363,6 +528,19 @@ Answer in at most 180 words, referring to the actual numbers above. Use LaTeX wi
           )}
         </aside>
       </div>
+
+      <AddToNotebookDialog
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        sim={sim}
+        currentValues={vals}
+        readouts={reads}
+        equations={eqs}
+        canvasDataUrl={snapshotUrl}
+        notebookTitle={notebookContext?.notebookTitle}
+        currentPage={notebookContext?.pageNumber}
+        onNavigateToNotebook={notebookContext?.onBackToNotebook}
+      />
     </div>
   );
 }

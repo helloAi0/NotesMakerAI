@@ -1,14 +1,15 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { 
   Download, ChevronLeft, ChevronRight, Volume2, Type, MousePointer, 
-  Settings2, Sparkles, Table, Image as ImageIcon, Shapes, LayoutTemplate, 
-  FileText, Square, Circle, ArrowRight, Trash2, Undo2, Redo2, Save, 
-  Search, User, Minus, X, AlignLeft, AlignCenter, AlignRight, 
-  ArrowUp, ArrowDown, Layers, Activity
+  Sparkles, Shapes, Square, Circle, ArrowRight, Trash2, Undo2, Redo2, Save, 
+  Search, User, Minus, X, Activity
 } from 'lucide-react';
 
-// IMPORT THE NEW SIMULATION COMPONENT
+// IMPORT SIMULATION & EXPERIMENT COMPONENTS
 import VisualsStudio from './VisualsStudio';
+import ExperimentCard from './ExperimentCard';
+import { loadAllExperiments, deleteExperimentRecord, type ExperimentRecord } from '../lib/experimentStore';
+import type { Values } from '../sims/types';
 
 interface NotebookWorkspaceProps {
   notebookData?: {
@@ -50,9 +51,28 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const [history, setHistory] = useState<ShapeObj[][]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
 
-  // --- NOTEBOOK TEXT ---
-  const [pageTypedText, setPageTypedText] = useState<{ [page: number]: string }>({
-    1: "Hello My name is taha"
+  const activeTitle = notebookData?.title || "Human Anatomy & Physiology Notebook";
+
+  // --- EXPERIMENTS & SIMULATION INTEGRATION ---
+  const [experiments, setExperiments] = useState<ExperimentRecord[]>(() => loadAllExperiments());
+  const [simLaunchState, setSimLaunchState] = useState<{ simId: string; rawValues?: Values } | null>(null);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      setExperiments(loadAllExperiments());
+    };
+    window.addEventListener('notesmaker_experiments_updated', handleUpdate);
+    return () => window.removeEventListener('notesmaker_experiments_updated', handleUpdate);
+  }, []);
+
+  // --- NOTEBOOK TEXT WITH LOCALSTORAGE PERSISTENCE ---
+  const [pageTypedText, setPageTypedText] = useState<{ [page: number]: string }>(() => {
+    try {
+      const saved = localStorage.getItem(`notesmaker_text_${notebookData?.title || 'default'}`);
+      return saved ? JSON.parse(saved) : { 1: "Human anatomy and physiological mechanisms study notes." };
+    } catch {
+      return { 1: "Human anatomy and physiological mechanisms study notes." };
+    }
   });
 
   // --- CANVAS & SHAPES STATE ---
@@ -74,16 +94,14 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const [tempShape, setTempShape] = useState<ShapeObj | null>(null);
 
   // Default properties for new shapes
-  const [shapeFill, setShapeFill] = useState('#ffffff');
+  const [shapeFill] = useState('#ffffff');
   const [shapeStroke, setShapeStroke] = useState('#1e293b');
-  const [shapeStrokeWidth, setShapeStrokeWidth] = useState(2);
+  const [shapeStrokeWidth] = useState(2);
 
   // --- VOICE STUDIO ---
-  const [speechSpeed, setSpeechSpeed] = useState(1.0);
-  const [speechPitch, setSpeechPitch] = useState(1.0);
+  const [speechSpeed] = useState(1.0);
+  const [speechPitch] = useState(1.0);
   const [isPlaying, setIsPlaying] = useState(false);
-
-  const activeTitle = notebookData?.title || "Human Anatomy & Physiology Notebook";
   const activeSections = notebookData?.sections || [
     { heading: "Human Reproductive System", content: "The human reproductive system includes primary and secondary sex organs supporting gametogenesis and hormone production." }
   ];
@@ -356,6 +374,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
 
   const selectedShape = (pageShapes[currentPage] || []).find(s => s.id === selectedShapeId);
   const sortedShapes = [...(pageShapes[currentPage] || [])].sort((a, b) => a.zIndex - b.zIndex);
+  const pageExperiments = experiments.filter(e => e.notebookTitle === activeTitle && e.pageNumber === currentPage);
 
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 select-none font-sans">
@@ -507,6 +526,14 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
               <span className="text-[10px] text-slate-500 font-medium">Shape Styles</span>
             </div>
 
+            <div className="flex flex-col items-center border-r border-slate-200 pr-3">
+              <div className="flex gap-1 mb-1">
+                <button onClick={bringForward} className="px-2 py-1 text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 rounded">Forward</button>
+                <button onClick={sendBackward} className="px-2 py-1 text-[10px] font-semibold bg-slate-100 hover:bg-slate-200 rounded">Backward</button>
+              </div>
+              <span className="text-[10px] text-slate-500 font-medium">Arrange</span>
+            </div>
+
             <div className="flex flex-col items-center">
               <button onClick={deleteSelected} className="bg-red-50 text-red-600 border border-red-200 px-3 py-1.5 rounded font-semibold flex items-center gap-1 hover:bg-red-100 mb-1"><Trash2 className="w-4 h-4"/> Delete</button>
               <span className="text-[10px] text-slate-500 font-medium">Action</span>
@@ -531,7 +558,18 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
         {/* RENDER THE ISOLATED VISUALIZER COMPONENT */}
         {activeTab === 'Visuals' ? (
           <div className="w-full flex justify-center pt-8">
-             <VisualsStudio />
+             <VisualsStudio
+               initialSimId={simLaunchState?.simId}
+               initialValues={simLaunchState?.rawValues}
+               notebookContext={{
+                 notebookTitle: activeTitle,
+                 pageNumber: currentPage,
+                 onBackToNotebook: () => {
+                   setSimLaunchState(null);
+                   setActiveTab('Home');
+                 },
+               }}
+             />
           </div>
         ) : (
           /* Normal Notebook Page View */
@@ -539,9 +577,17 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
             <div className="absolute left-16 top-0 bottom-0 w-[1px] bg-red-300/60 pointer-events-none z-0"></div>
 
             <div className="p-16 relative z-0 space-y-6 text-slate-900">
-              <div className="border-b-2 border-slate-800/20 pb-4">
-                <h1 className="text-3xl font-bold tracking-tight">{activeTitle}</h1>
-                <p className="text-xs opacity-70 mt-1">Page {currentPage} of {totalPages}</p>
+              <div className="border-b-2 border-slate-800/20 pb-4 flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold tracking-tight">{activeTitle}</h1>
+                  <p className="text-xs opacity-70 mt-1">Page {currentPage} of {totalPages}</p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('Visuals')}
+                  className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-100 hover:bg-amber-200 border border-amber-300 px-3.5 py-2 rounded-xl shadow-sm transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-700" /> Simulations Studio
+                </button>
               </div>
 
               <div className="space-y-6">
@@ -551,12 +597,81 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                 </div>
               </div>
 
-              <div className="mt-6 pt-4 relative">
-                 <div className="w-full text-slate-900 text-base font-sans whitespace-pre-wrap select-text" style={{ lineHeight: '32px', minHeight: '350px' }}>
-                    {(pageTypedText[currentPage] || '').split('\n').map((line, idx) => (
+              {/* Student Typed Notes with autosave */}
+              <div className="mt-4 pt-2 relative">
+                {inputMode === 'keyboard' ? (
+                  <textarea
+                    value={pageTypedText[currentPage] || ''}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPageTypedText(prev => ({ ...prev, [currentPage]: val }));
+                      try {
+                        localStorage.setItem(`notesmaker_text_${activeTitle}`, JSON.stringify({ ...pageTypedText, [currentPage]: val }));
+                      } catch (e) {
+                        void e;
+                      }
+                    }}
+                    placeholder="Type student notes, hypotheses, and conclusions here..."
+                    className="w-full text-slate-900 text-base font-sans p-3 bg-amber-50/30 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-y leading-relaxed min-h-[140px]"
+                  />
+                ) : (
+                  <div
+                    onClick={() => setInputMode('keyboard')}
+                    className="w-full text-slate-900 text-base font-sans whitespace-pre-wrap select-text cursor-text"
+                    style={{ lineHeight: '30px', minHeight: '120px' }}
+                  >
+                    {(pageTypedText[currentPage] || 'Click here or select Type mode above to write notes...').split('\n').map((line, idx) => (
                       <div key={idx} className="px-1"><span>{line || '\u00A0'}</span></div>
                     ))}
                   </div>
+                )}
+              </div>
+
+              {/* SAVED LAB EXPERIMENTS & SIMULATION RECORDS */}
+              <div className="mt-8 pt-6 border-t-2 border-amber-200/80 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-600" />
+                    <h3 className="font-bold text-base text-slate-800">
+                      Simulation Experiments & Saved Records ({pageExperiments.length})
+                    </h3>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('Visuals')}
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 px-3 py-1.5 rounded-lg transition-all"
+                  >
+                    <Activity className="w-3.5 h-3.5 text-amber-600" /> Open Visuals Studio
+                  </button>
+                </div>
+
+                {pageExperiments.length > 0 ? (
+                  <div className="space-y-5">
+                    {pageExperiments.map((exp) => (
+                      <ExperimentCard
+                        key={exp.id}
+                        record={exp}
+                        onReopen={(simId, rawValues) => {
+                          setSimLaunchState({ simId, rawValues: rawValues as Values });
+                          setActiveTab('Visuals');
+                        }}
+                        onDelete={(id) => deleteExperimentRecord(id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 rounded-2xl border-2 border-dashed border-amber-300/80 bg-amber-50/40 text-center space-y-2">
+                    <p className="text-xs font-bold text-slate-800">No simulation experiments added to Page {currentPage} yet</p>
+                    <p className="text-[11px] text-slate-500 max-w-md mx-auto leading-relaxed">
+                      Launch any physics, robotics, electronics, or mathematics simulation, test parameters, and click <strong>Add to Notebook</strong> to save live snapshots, calculated results, and interactive states.
+                    </p>
+                    <button
+                      onClick={() => setActiveTab('Visuals')}
+                      className="mt-1 inline-flex items-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold shadow-md transition-all active:scale-95"
+                    >
+                      <Sparkles className="w-4 h-4" /> Conduct Experiment in Visuals Studio
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Sparkles, BookOpen, Layers, CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { Sparkles, BookOpen, CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
 
 interface AIGeneratorViewProps {
   onNotesGenerated: (notesData: any) => void;

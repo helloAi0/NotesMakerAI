@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import NotebookWorkspace from './components/NotebookWorkspace';
 import PdfSourceLibrary from './components/PdfSourceLibrary';
-import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard } from 'lucide-react';
+import VisualsStudio from './components/VisualsStudio';
+import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity } from 'lucide-react';
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState('library'); // Set to 'library' so you can test Phase 8 immediately
+  const [activeTab, setActiveTab] = useState('notebook');
 
   return (
     <div className="min-h-screen flex bg-[#fbf9f5] font-sans">
@@ -45,6 +46,13 @@ export default function App() {
               Digital Notebook
             </button>
             <button 
+              onClick={() => setActiveTab('simulations')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === 'simulations' ? 'bg-amber-100 text-amber-900' : 'text-slate-600 hover:bg-slate-100'}`}
+            >
+              <Activity className="w-5 h-5 text-amber-700"/>
+              Visuals Studio
+            </button>
+            <button 
               onClick={() => setActiveTab('planner')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-colors ${activeTab === 'planner' ? 'bg-amber-100 text-amber-900' : 'text-slate-600 hover:bg-slate-100'}`}
             >
@@ -76,7 +84,7 @@ export default function App() {
               <Search className="absolute left-3 top-3 w-4 h-4 text-slate-400"/>
               <input 
                 type="text"
-                placeholder="Search topics, notes, or uploaded PDFs..."
+                placeholder="Search topics, notes, or simulations..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 bg-amber-50/50 border border-amber-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20"
@@ -84,9 +92,12 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition-all">
+            <button 
+              onClick={() => setActiveTab('simulations')}
+              className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-sm font-medium shadow-sm transition-all"
+            >
               <Sparkles className="w-4 h-4"/>
-              Generate AI Notes
+              Explore Simulations
             </button>
           </div>
         </header>
@@ -95,9 +106,15 @@ export default function App() {
         <div className="flex-1 overflow-hidden">
           {activeTab === 'notebook' && <NotebookWorkspace />}
           
+          {activeTab === 'simulations' && (
+            <div className="h-full overflow-y-auto p-8 bg-slate-100">
+              <VisualsStudio />
+            </div>
+          )}
+
           {activeTab === 'library' && <PdfSourceLibrary />}
           
-          {activeTab !== 'notebook' && activeTab !== 'library' && (
+          {activeTab !== 'notebook' && activeTab !== 'simulations' && activeTab !== 'library' && (
              <div className="flex-1 flex items-center justify-center h-full bg-slate-100 text-slate-500">
                 <div className="text-center">
                   <h2 className="text-xl font-bold mb-2 capitalize">{activeTab} View</h2>
