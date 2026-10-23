@@ -1,0 +1,3 @@
+import { dictateMath } from '../src/lib/mathDictation.ts';
+const cases = ["f of x equals x squared plus two x plus one","integral from zero to one of x squared d x","partial derivative of u with respect to t","square root of x squared plus y squared","limit as x approaches zero of sine x over x","a plus b whole squared","one over x plus one","sum from i equals one to n of i squared","force equals mass times acceleration","e equals m c squared","x equals negative b plus or minus square root of b squared minus four a c all over two a"];
+for (const c of cases) { const r = dictateMath(c); console.log(c, '\n  =>', r.ok, r.needsChoice, JSON.stringify(r.candidates.map(x=>x.latex)), r.warnings.join('|')); }

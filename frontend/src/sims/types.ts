@@ -13,7 +13,11 @@ export type SimSubject =
   | 'Earth Science'
   | 'Electronics'
   | 'Robotics'
-  | 'Computer Science';
+  | 'Computer Science'
+  | 'Engineering'
+  | 'Materials'
+  | 'Quantum'
+  | 'Security';
 
 export type EducationLevel =
   | 'Class 8'
@@ -29,6 +33,13 @@ export type EducationLevel =
   | 'M.Sc';
 
 export type EducationCategory = 'All' | 'School' | 'Undergraduate' | 'Postgraduate';
+
+export const SCHOOL_8_10: EducationLevel[] = ['Class 8', 'Class 9', 'Class 10'];
+export const SCHOOL_11_12: EducationLevel[] = ['Class 11', 'Class 12'];
+export const SCHOOL_ALL: EducationLevel[] = ['Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12'];
+export const UG_ENG: EducationLevel[] = ['B.Tech'];
+export const UG_SCI: EducationLevel[] = ['B.Sc', 'B.Tech'];
+export const PG_ALL: EducationLevel[] = ['M.Tech', 'M.Sc'];
 
 export type Difficulty = 'Beginner' | 'Intermediate' | 'Advanced';
 
@@ -88,6 +99,10 @@ export interface SimDef<S> {
   educationLevels?: EducationLevel[];
   /** Difficulty level */
   difficulty?: Difficulty;
+  /** Extra search words (course names, exam names, synonyms) used by the Studio search. */
+  tags?: string[];
+  /** Exact curriculum-topic phrases (from the master topic list) that this simulation genuinely teaches. */
+  covers?: string[];
   /** Subject topic and subtopic */
   topic?: string;
   subtopic?: string;

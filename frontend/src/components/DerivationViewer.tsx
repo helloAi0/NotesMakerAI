@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft, ChevronRight, Volume2, VolumeX, Sparkles,
-  CheckCircle2, Info, Layers, Check
+  CheckCircle2, Info, Layers, Check, HelpCircle
 } from 'lucide-react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';

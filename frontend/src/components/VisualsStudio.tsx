@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search, ArrowLeft, ExternalLink, Maximize2, Atom, FlaskConical, Dna, Sigma,
-  Globe, Activity, Clock, Sparkles, Bot, Cpu, Terminal, GraduationCap, BookOpen, Layers
+  Globe, Activity, Clock, Sparkles, Bot, Cpu, Terminal, GraduationCap, BookOpen, Layers, Wrench, Gem, Shield, Orbit
 } from 'lucide-react';
 import SimPlayer from './SimPlayer';
 import SimThumb from './SimThumb';
@@ -23,6 +23,10 @@ const ALL_SUBJECT_ICONS: Record<SimSubject, typeof Atom> = {
   Electronics: Cpu,
   Robotics: Bot,
   'Computer Science': Terminal,
+  Engineering: Wrench,
+  Materials: Gem,
+  Quantum: Orbit,
+  Security: Shield,
 };
 
 const SUBJECT_TINT: Record<Subject, string> = {

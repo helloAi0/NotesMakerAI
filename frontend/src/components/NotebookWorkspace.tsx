@@ -1,9 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
 import { 
-  Download, ChevronLeft, ChevronRight, Volume2, Type, MousePointer, 
-  Sparkles, Shapes, Square, Circle, ArrowRight, Trash2, Undo2, Redo2, Save, 
-  Search, User, Minus, X, Activity
+  ChevronLeft, ChevronRight, Volume2, Type, MousePointer, 
+  Sparkles, Shapes, Square, Circle, ArrowRight, Trash2, Undo2, Redo2, Minus, X, 
+  Activity, Mic, Square as StopSquare, Pause, Play, SkipBack, SkipForward, RotateCcw, Highlighter, Eraser, Pencil, Sigma, Table2, MessageSquareQuote, ListChecks, Printer, Wand2, Copy
 } from 'lucide-react';
+import RichText from './RichText';
+import MarkdownView from './MarkdownView';
+import EquationDictation from './EquationDictation';
+import { useReader, useDictation, applyVoiceCommands, SPEECH_LANGS } from '../lib/useVoice';
+import { splitSentences, type SpeechSegment } from '../lib/speechUtils';
+import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../lib/aiClient';
 
 // IMPORT SIMULATION & EXPERIMENT COMPONENTS
 import VisualsStudio from './VisualsStudio';
@@ -39,7 +45,7 @@ type ShapeObj = {
 };
 
 export default function NotebookWorkspace({ notebookData }: NotebookWorkspaceProps) {
-  const [activeTab, setActiveTab] = useState<'Home' | 'Insert' | 'Design' | 'Layout' | 'Review' | 'View' | 'Shape Format' | 'Visuals'>('Home');
+  const [activeTab, setActiveTab] = useState<'Home' | 'Insert' | 'Draw' | 'Voice' | 'AI Assistant' | 'Shape Format' | 'Visuals'>('Home');
   const [paperStyle, setPaperStyle] = useState<'ruled' | 'grid' | 'plain' | 'dark'>('ruled');
   const [inputMode, setInputMode] = useState<'pen' | 'keyboard' | 'read' | 'shapes'>('read');
   const [tool, setTool] = useState<'pen' | 'highlighter' | 'eraser' | 'rectangle' | 'circle' | 'arrow' | 'line'>('pen');
@@ -68,7 +74,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   // --- NOTEBOOK TEXT WITH LOCALSTORAGE PERSISTENCE ---
   const [pageTypedText, setPageTypedText] = useState<{ [page: number]: string }>(() => {
     try {
-      const saved = localStorage.getItem(`notesmaker_text_${notebookData?.title || 'default'}`);
+      const saved = localStorage.getItem(`notesmaker_text_${activeTitle}`);
       return saved ? JSON.parse(saved) : { 1: "Human anatomy and physiological mechanisms study notes." };
     } catch {
       return { 1: "Human anatomy and physiological mechanisms study notes." };
@@ -76,13 +82,18 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   });
 
   // --- CANVAS & SHAPES STATE ---
-  const [pageDrawings, setPageDrawings] = useState<{ [page: number]: string }>({});
+  const storeKey = (k: string) => `notesmaker_${k}_${notebookData?.title || 'default'}`;
+  const [pageDrawings, setPageDrawings] = useState<{ [page: number]: string }>(() => {
+    try { const r = localStorage.getItem(storeKey('drawings')); return r ? JSON.parse(r) : {}; } catch { return {}; }
+  });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
 
-  const [pageShapes, setPageShapes] = useState<{ [page: number]: ShapeObj[] }>({
-    1: []
+  const [pageShapes, setPageShapes] = useState<{ [page: number]: ShapeObj[] }>(() => {
+    try { const r = localStorage.getItem(storeKey('shapes')); return r ? JSON.parse(r) : { 1: [] }; } catch { return { 1: [] }; }
   });
+  useEffect(() => { try { localStorage.setItem(storeKey('shapes'), JSON.stringify(pageShapes)); } catch { /* storage full or blocked */ } }, [pageShapes]);
+  useEffect(() => { try { localStorage.setItem(storeKey('drawings'), JSON.stringify(pageDrawings)); } catch { /* storage full or blocked */ } }, [pageDrawings]);
 
   // --- STUDIO INTERACTION STATE ---
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
@@ -96,12 +107,21 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   // Default properties for new shapes
   const [shapeFill] = useState('#ffffff');
   const [shapeStroke, setShapeStroke] = useState('#1e293b');
-  const [shapeStrokeWidth] = useState(2);
+  const [shapeStrokeWidth, setShapeStrokeWidth] = useState(2);
 
   // --- VOICE STUDIO ---
-  const [speechSpeed] = useState(1.0);
-  const [speechPitch] = useState(1.0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const reader = useReader();
+  const notesRef = useRef<HTMLTextAreaElement | null>(null);
+  const caretRef = useRef<number | null>(null);
+  const textRef = useRef(pageTypedText);
+  textRef.current = pageTypedText;
+  const pageRef = useRef(currentPage);
+  pageRef.current = currentPage;
+  const [showEquation, setShowEquation] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiOut, setAiOut] = useState('');
+  const [aiErr, setAiErr] = useState('');
+  const [aiTitle, setAiTitle] = useState('');
   const activeSections = notebookData?.sections || [
     { heading: "Human Reproductive System", content: "The human reproductive system includes primary and secondary sex organs supporting gametogenesis and hormone production." }
   ];
@@ -172,8 +192,9 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     const x = ('touches' in e ? e.touches[0].clientX - rect.left : e.clientX - rect.left) * (canvasRef.current.width / rect.width);
     const y = ('touches' in e ? e.touches[0].clientY - rect.top : e.clientY - rect.top) * (canvasRef.current.height / rect.height);
     ctxRef.current.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
-    ctxRef.current.strokeStyle = shapeStroke;
-    ctxRef.current.lineWidth = tool === 'eraser' ? 15 : shapeStrokeWidth * 2;
+    ctxRef.current.strokeStyle = tool === 'highlighter' ? '#facc15' : shapeStroke;
+    ctxRef.current.globalAlpha = tool === 'highlighter' ? 0.35 : 1;
+    ctxRef.current.lineWidth = tool === 'eraser' ? 18 : tool === 'highlighter' ? 16 : shapeStrokeWidth * 2;
     ctxRef.current.lineTo(x, y);
     ctxRef.current.stroke();
     setSaveStatus('Unsaved...');
@@ -182,7 +203,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const stopCanvasDraw = () => {
     if (!isDrawingShape) return;
     setIsDrawingShape(false);
-    if (ctxRef.current) ctxRef.current.closePath();
+    if (ctxRef.current) { ctxRef.current.closePath(); ctxRef.current.globalAlpha = 1; }
     if (canvasRef.current) {
       setPageDrawings(prev => ({ ...prev, [currentPage]: canvasRef.current!.toDataURL() }));
     }
@@ -352,16 +373,120 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     updateShapes(newShapes);
   };
 
-  const speakText = (text: string) => {
-    if (!text.trim() || !('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = speechSpeed;
-    utterance.pitch = speechPitch;
-    utterance.onstart = () => setIsPlaying(true);
-    utterance.onend = () => setIsPlaying(false);
-    window.speechSynthesis.speak(utterance);
+  // ---- notes editing helpers ----
+  const setNotesFor = (page: number, val: string) => {
+    const next = { ...textRef.current, [page]: val };
+    textRef.current = next;
+    setPageTypedText(next);
+    try { localStorage.setItem(`notesmaker_text_${activeTitle}`, JSON.stringify(next)); } catch { /* storage blocked */ }
+    setSaveStatus('Saved');
   };
+  const insertAtCaret = (snippet: string, transform?: (before: string) => string) => {
+    const page = pageRef.current;
+    const cur = textRef.current[page] || '';
+    const pos = Math.min(caretRef.current ?? cur.length, cur.length);
+    const text = transform ? transform(cur.slice(0, pos)) : snippet;
+    setNotesFor(page, cur.slice(0, pos) + text + cur.slice(pos));
+    caretRef.current = pos + text.length;
+    setInputMode('keyboard');
+    requestAnimationFrame(() => {
+      const ta = notesRef.current;
+      if (ta) { ta.focus(); ta.setSelectionRange(caretRef.current!, caretRef.current!); }
+    });
+  };
+  const dict = useDictation(text => {
+    insertAtCaret('', before => applyVoiceCommands(text, before.slice(-1)));
+  });
+  const startDictation = () => {
+    setInputMode('keyboard');
+    setActiveTab('Voice');
+    dict.start();
+  };
+
+  // ---- reading aloud ----
+  const sentsOf = (prefix: string, text: string): SpeechSegment[] => splitSentences(text).map((t, i) => ({ id: `${prefix}-${i}`, text: t }));
+  const headingS = sentsOf('h', currentSection.heading);
+  const contentS = sentsOf('c', currentSection.content);
+  const noteLines = (pageTypedText[currentPage] || '').split('\n').map((line, li) => sentsOf(`n${li}`, line));
+  const allSegs: SpeechSegment[] = [{ id: 't-0', text: activeTitle }, ...headingS, ...contentS, ...noteLines.flat()];
+  const playPage = () => reader.playFrom(allSegs, 0);
+  const speakFrom = (id: string) => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed && sel.toString().trim()) return; // the student is selecting text, not clicking
+    const i = allSegs.findIndex(x => x.id === id);
+    if (i >= 0) reader.playFrom(allSegs, i);
+  };
+  const readSelection = () => {
+    const t = window.getSelection()?.toString().trim() || (notesRef.current ? notesRef.current.value.slice(notesRef.current.selectionStart, notesRef.current.selectionEnd).trim() : '');
+    if (!t) { reader.playFrom(allSegs, 0); return; }
+    reader.playFrom(splitSentences(t).map((x, i) => ({ id: `sel-${i}`, text: x })), 0);
+  };
+  const readParagraph = () => {
+    // from the start of the paragraph that holds the sentence being read (or the first note line)
+    const cur = Math.max(0, reader.index);
+    const id = allSegs[cur]?.id ?? 'h-0';
+    const prefix = id.split('-')[0];
+    const first = allSegs.findIndex(x => x.id.split('-')[0] === prefix);
+    reader.playFrom(allSegs.filter(x => x.id.split('-')[0] === prefix), 0);
+    void first;
+  };
+  const readSection = () => reader.playFrom([...headingS, ...contentS], 0);
+
+  useEffect(() => { reader.stop(); }, [currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!reader.segId) return;
+    document.querySelector(`[data-seg="${reader.segId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [reader.segId]);
+
+  const renderSent = (x: SpeechSegment) => (
+    <span
+      key={x.id}
+      data-seg={x.id}
+      role="button"
+      tabIndex={0}
+      title="Click to hear from here"
+      onClick={() => speakFrom(x.id)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); speakFrom(x.id); } }}
+      className={`cursor-pointer rounded px-0.5 transition-colors hover:bg-amber-200/70 ${reader.segId === x.id ? 'bg-yellow-300 text-slate-900' : ''}`}
+    ><RichText text={x.text} />{' '}</span>
+  );
+
+  // ---- AI study assistant ----
+  const AI_ACTIONS: { id: string; label: string; ask: string }[] = [
+    { id: 'sum', label: 'Summarize page', ask: 'Summarize these notes in 5 short bullet points.' },
+    { id: 'simple', label: 'Explain simply', ask: 'Explain these notes in simple words for a student, with one everyday example.' },
+    { id: 'terms', label: 'Key terms', ask: 'List the key terms with a one-line definition each.' },
+    { id: 'quiz', label: 'Make a quiz', ask: 'Write 5 multiple-choice questions with 4 options each. Put the answer key at the end.' },
+    { id: 'cards', label: 'Flashcards', ask: 'Write 8 flashcards as "Q: ... / A: ..." pairs.' },
+    { id: 'eq', label: 'Explain equation', ask: 'Explain every equation in these notes: what each symbol means, units, and when it is used. Write math with $...$.' },
+    { id: 'prob', label: 'Practice problems', ask: 'Write 4 practice problems of increasing difficulty with short worked solutions. Write math with $...$.' },
+    { id: 'fix', label: 'Clean up my notes', ask: 'Rewrite my typed notes so they are clear and correct, keeping my meaning. Write math with $...$.' },
+  ];
+  const runAi = async (a: { label: string; ask: string }) => {
+    const provider = loadProvider();
+    const saved = loadSaved(provider, (import.meta.env.VITE_GEMINI_API_KEY as string) || '');
+    setAiTitle(a.label); setAiOut(''); setAiErr('');
+    if (!saved.apiKey) { setAiErr('Add an AI key first: open the PDF Library tab, choose a provider and save a key. The assistant uses the same key.'); return; }
+    const sel = window.getSelection()?.toString().trim();
+    const body = sel || `${currentSection.heading}\n${currentSection.content}\n${pageTypedText[currentPage] || ''}`;
+    setAiBusy(true);
+    try {
+      const out = await generate(
+        { provider, apiKey: saved.apiKey, model: saved.model, baseUrl: saved.baseUrl, speed: loadSpeed() },
+        `You are a study assistant inside a notebook. ${a.ask}\n\nNotes${sel ? ' (selected text)' : ''}:\n"""\n${body}\n"""`,
+        { maxTokens: 1200, onText: setAiOut, timeoutMs: 45000 },
+      );
+      setAiOut(out);
+    } catch (e) { setAiErr(friendlyError(e)); } finally { setAiBusy(false); }
+  };
+
+  const clearDrawing = () => {
+    const c = canvasRef.current;
+    if (c && ctxRef.current) { ctxRef.current.clearRect(0, 0, c.width, c.height); }
+    setPageDrawings(prev => ({ ...prev, [currentPage]: '' }));
+    updateShapes([]);
+  };
+  const pickTool = (t: typeof tool) => { setTool(t); setInputMode(t === 'pen' || t === 'highlighter' || t === 'eraser' ? 'pen' : 'shapes'); };
 
   const getPaperBackground = () => {
     switch (paperStyle) {
@@ -377,54 +502,37 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const pageExperiments = experiments.filter(e => e.notebookTitle === activeTitle && e.pageNumber === currentPage);
 
   return (
-    <div className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 select-none font-sans">
+    <div className="print-root flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 font-sans">
       
       {/* 1. TOP TITLE BAR */}
-      <div className="bg-[#1e293b] text-white px-4 py-1 flex items-center justify-between text-xs h-9">
+      <div className="no-print bg-[#1e293b] text-white px-4 py-1 flex items-center justify-between text-xs h-9">
         <div className="flex items-center gap-4">
           <span className="font-bold text-amber-400 text-sm">Notes Maker AI</span>
-          <div className="flex items-center gap-2 border-l border-slate-600 pl-4">
-            <label className="flex items-center gap-1 cursor-pointer">
-              <input type="checkbox" checked={autoSave} onChange={(e) => setAutoSave(e.target.checked)} className="w-3 h-3 accent-amber-500" />
-              AutoSave
-            </label>
-            <button className="p-1 hover:bg-slate-700 rounded" title="Save"><Save className="w-3.5 h-3.5"/></button>
-          </div>
+          <label className="flex items-center gap-1 cursor-pointer border-l border-slate-600 pl-4">
+            <input type="checkbox" checked={autoSave} onChange={(e) => setAutoSave(e.target.checked)} className="w-3 h-3 accent-amber-500" />
+            AutoSave
+          </label>
           <div className="flex items-center gap-1 border-l border-slate-600 pl-4">
-            <button onClick={undo} disabled={historyIndex <= 0} className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Undo2 className="w-3.5 h-3.5"/></button>
-            <button onClick={redo} disabled={historyIndex >= history.length - 1} className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Redo2 className="w-3.5 h-3.5"/></button>
+            <button onClick={undo} disabled={historyIndex <= 0} title="Undo shape change" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Undo2 className="w-3.5 h-3.5"/></button>
+            <button onClick={redo} disabled={historyIndex >= history.length - 1} title="Redo shape change" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Redo2 className="w-3.5 h-3.5"/></button>
           </div>
         </div>
-        
-        <div className="flex items-center gap-3 flex-1 max-w-xl mx-4">
-          <div className="relative flex-1">
-             <Search className="w-3.5 h-3.5 absolute left-2 top-1.5 text-slate-400" />
-             <input type="text" placeholder="Search" className="w-full bg-slate-800 text-white rounded pl-7 pr-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-500" />
-          </div>
-          <span className="font-semibold text-slate-300 whitespace-nowrap">{activeTitle}.docx</span>
-        </div>
-
+        <span className="font-semibold text-slate-300 truncate mx-4">{activeTitle}</span>
         <div className="flex items-center gap-3">
           <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${saveStatus === 'Saved' ? 'bg-emerald-600' : 'bg-amber-600'}`}>{saveStatus}</span>
-          <button className="bg-amber-600 px-3 py-1 rounded font-medium hover:bg-amber-700 flex items-center gap-1"><Download className="w-3 h-3"/> Export PDF</button>
-          <div className="flex items-center gap-1 border-l border-slate-600 pl-4">
-            <button className="p-1 hover:bg-slate-700 rounded"><Minus className="w-3.5 h-3.5"/></button>
-            <button className="p-1 hover:bg-slate-700 rounded"><Square className="w-3 h-3"/></button>
-            <button className="p-1 hover:bg-red-600 rounded"><X className="w-3.5 h-3.5"/></button>
-          </div>
-          <button className="p-1 bg-slate-700 rounded-full"><User className="w-4 h-4"/></button>
+          <button onClick={() => window.print()} className="bg-amber-600 px-3 py-1 rounded font-medium hover:bg-amber-700 flex items-center gap-1"><Printer className="w-3 h-3"/> Print / Save PDF</button>
         </div>
       </div>
 
       {/* 2. MAIN NAVIGATION RIBBON TABS */}
-      <div className="flex items-center px-4 bg-[#f3f4f6] border-b border-slate-300 text-xs font-medium text-slate-700">
-        {(['Home', 'Insert', 'Design', 'Layout', 'Review', 'View', 'Shape Format', 'Visuals'] as const).map((tab) => {
+      <div className="no-print flex items-center px-4 bg-[#f3f4f6] border-b border-slate-300 text-xs font-medium text-slate-700 overflow-x-auto">
+        {(['Home', 'Insert', 'Draw', 'Voice', 'AI Assistant', 'Shape Format', 'Visuals'] as const).map((tab) => {
           if (tab === 'Shape Format' && !selectedShapeId) return null;
           return (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 border-b-2 transition-colors ${activeTab === tab ? 'border-amber-600 bg-white text-slate-900 font-semibold shadow-inner' : 'border-transparent hover:bg-slate-200'} ${tab === 'Shape Format' ? 'text-amber-700 bg-amber-50/50' : ''} ${tab === 'Visuals' ? 'text-blue-700 bg-blue-50/50' : ''}`}
+              className={`px-4 py-2 border-b-2 whitespace-nowrap transition-colors ${activeTab === tab ? 'border-amber-600 bg-white text-slate-900 font-semibold shadow-inner' : 'border-transparent hover:bg-slate-200'} ${tab === 'Shape Format' ? 'text-amber-700 bg-amber-50/50' : ''} ${tab === 'Visuals' ? 'text-blue-700 bg-blue-50/50' : ''}`}
             >
               {tab === 'Visuals' ? '✨ Visuals Studio' : tab}
             </button>
@@ -433,43 +541,21 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       </div>
 
       {/* 3. RIBBON CONTENT */}
-      <div className="bg-white px-4 py-2 flex items-center overflow-x-auto text-xs border-b border-slate-200 min-h-[96px] shadow-sm z-10 relative">
+      <div className="no-print bg-white px-4 py-2 flex items-center overflow-x-auto text-xs border-b border-slate-200 min-h-[96px] shadow-sm z-10 relative">
         
         {activeTab === 'Home' && (
           <div className="flex items-center gap-6">
             <div className="flex flex-col items-center border-r border-slate-200 pr-4">
               <div className="flex items-center gap-1 bg-slate-100 p-1 rounded border border-slate-200 mb-1">
-                <button onClick={() => setInputMode('read')} className={`px-2.5 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'read' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><Volume2 className="w-4 h-4"/> Read</button>
-                <button onClick={() => setInputMode('pen')} className={`px-2.5 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'pen' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><MousePointer className="w-4 h-4"/> Pen</button>
-                <button onClick={() => setInputMode('shapes')} className={`px-2.5 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'shapes' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><Shapes className="w-4 h-4"/> Studio</button>
-                <button onClick={() => setInputMode('keyboard')} className={`px-2.5 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'keyboard' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><Type className="w-4 h-4"/> Type</button>
+                <button onClick={() => setInputMode('read')} className={`px-3 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'read' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><Volume2 className="w-4 h-4"/> Read</button>
+                <button onClick={() => setInputMode('keyboard')} className={`px-3 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'keyboard' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><Type className="w-4 h-4"/> Edit</button>
+                <button onClick={() => setInputMode('pen')} className={`px-3 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'pen' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><MousePointer className="w-4 h-4"/> Pen</button>
+                <button onClick={() => { setInputMode('shapes'); if (tool === 'pen' || tool === 'eraser' || tool === 'highlighter') setTool('rectangle'); }} className={`px-3 py-1.5 rounded font-semibold flex flex-col items-center gap-1 ${inputMode === 'shapes' ? 'bg-amber-600 text-white' : 'text-slate-700 hover:bg-slate-200'}`}><Shapes className="w-4 h-4"/> Shapes</button>
               </div>
-              <span className="text-[10px] text-slate-500 font-medium">Input Mode</span>
+              <span className="text-[10px] text-slate-500 font-medium">Mode</span>
             </div>
-            
-            {inputMode === 'shapes' && (
-               <div className="flex flex-col items-center border-r border-slate-200 pr-4">
-                 <div className="flex items-center gap-1 bg-slate-100 p-1 rounded border border-slate-200 mb-1">
-                    <button onClick={() => setTool('rectangle')} className={`px-2 py-1 rounded font-semibold flex items-center gap-1 ${tool === 'rectangle' ? 'bg-amber-600 text-white' : ''}`}><Square className="w-4 h-4"/> Box</button>
-                    <button onClick={() => setTool('circle')} className={`px-2 py-1 rounded font-semibold flex items-center gap-1 ${tool === 'circle' ? 'bg-amber-600 text-white' : ''}`}><Circle className="w-4 h-4"/> Circle</button>
-                    <button onClick={() => setTool('arrow')} className={`px-2 py-1 rounded font-semibold flex items-center gap-1 ${tool === 'arrow' ? 'bg-amber-600 text-white' : ''}`}><ArrowRight className="w-4 h-4"/> Arrow</button>
-                    <button onClick={() => setTool('line')} className={`px-2 py-1 rounded font-semibold flex items-center gap-1 ${tool === 'line' ? 'bg-amber-600 text-white' : ''}`}><Minus className="w-4 h-4"/> Line</button>
-                 </div>
-                 <span className="text-[10px] text-slate-500 font-medium">Insert Shapes</span>
-               </div>
-            )}
-
             <div className="flex flex-col items-center border-r border-slate-200 pr-4">
-              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded border border-slate-200 mb-1">
-                {['#1e293b', '#b91c1c', '#15803d', '#1d4ed8', '#b45309', '#7c3aed', '#db2777', '#000000'].map((c) => (
-                  <button key={c} onClick={() => { setShapeStroke(c); if(selectedShapeId) updateSelectedProperty('strokeColor', c); }} className={`w-5 h-5 rounded-full border ${shapeStroke === c ? 'scale-125 border-slate-900 shadow' : 'border-slate-300'}`} style={{ backgroundColor: c }} />
-                ))}
-              </div>
-              <span className="text-[10px] text-slate-500 font-medium">Colors</span>
-            </div>
-
-            <div className="flex flex-col items-center">
-              <select value={paperStyle} onChange={(e) => setPaperStyle(e.target.value as any)} className="bg-slate-100 border border-slate-300 rounded px-2 py-1.5 text-xs font-medium text-slate-700 mb-1">
+              <select value={paperStyle} onChange={(e) => setPaperStyle(e.target.value as typeof paperStyle)} className="bg-slate-100 border border-slate-300 rounded px-2 py-1.5 text-xs font-medium text-slate-700 mb-1">
                 <option value="ruled">Ruled Paper</option>
                 <option value="grid">Grid Paper</option>
                 <option value="plain">Plain Paper</option>
@@ -477,6 +563,131 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
               </select>
               <span className="text-[10px] text-slate-500 font-medium">Paper Style</span>
             </div>
+            <div className="text-[11px] text-slate-500 max-w-xs leading-snug">
+              <b>Read</b>: click any sentence to hear it from there. <b>Edit</b>: type or dictate notes. Use the <b>Voice</b> tab for dictation and equations.
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'Insert' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {[
+              { icon: <Sigma className="w-4 h-4"/>, label: 'Fraction', text: '$\\frac{a}{b}$' },
+              { icon: <Sigma className="w-4 h-4"/>, label: 'Square root', text: '$\\sqrt{x}$' },
+              { icon: <Sigma className="w-4 h-4"/>, label: 'Integral', text: '$\\int_{0}^{1} x^{2}\\,dx$' },
+              { icon: <Sigma className="w-4 h-4"/>, label: 'Summation', text: '$\\sum_{i=1}^{n} i$' },
+              { icon: <Sigma className="w-4 h-4"/>, label: 'Matrix', text: '$$\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}$$' },
+              { icon: <Table2 className="w-4 h-4"/>, label: 'Table', text: '\n| Term | Meaning |\n| --- | --- |\n| ... | ... |\n' },
+              { icon: <MessageSquareQuote className="w-4 h-4"/>, label: 'Callout', text: '\n> Note: \n' },
+              { icon: <ListChecks className="w-4 h-4"/>, label: 'Checklist', text: '\n- [ ] \n- [ ] \n' },
+            ].map(b => (
+              <button key={b.label} onClick={() => insertAtCaret(b.text)} className="px-2.5 py-1.5 rounded bg-slate-100 hover:bg-amber-100 border border-slate-200 font-semibold flex items-center gap-1">{b.icon}{b.label}</button>
+            ))}
+            <button onClick={() => setShowEquation(true)} className="px-2.5 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Mic className="w-4 h-4"/> Equation by voice / words</button>
+            <button onClick={() => setActiveTab('Visuals')} className="px-2.5 py-1.5 rounded bg-blue-600 text-white font-semibold flex items-center gap-1"><Activity className="w-4 h-4"/> Simulation</button>
+          </div>
+        )}
+
+        {activeTab === 'Draw' && (
+          <div className="flex items-center gap-5 flex-wrap">
+            <div className="flex flex-col items-center border-r border-slate-200 pr-4">
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded border border-slate-200 mb-1">
+                {([['pen', <Pencil key="p" className="w-4 h-4"/>, 'Pen'], ['highlighter', <Highlighter key="h" className="w-4 h-4"/>, 'Highlight'], ['eraser', <Eraser key="e" className="w-4 h-4"/>, 'Eraser'], ['rectangle', <Square key="r" className="w-4 h-4"/>, 'Box'], ['circle', <Circle key="c" className="w-4 h-4"/>, 'Circle'], ['arrow', <ArrowRight key="a" className="w-4 h-4"/>, 'Arrow'], ['line', <Minus key="l" className="w-4 h-4"/>, 'Line']] as const).map(([t, ic, lb]) => (
+                  <button key={t} onClick={() => pickTool(t)} className={`px-2 py-1 rounded font-semibold flex flex-col items-center ${tool === t && (inputMode === 'pen' || inputMode === 'shapes') ? 'bg-amber-600 text-white' : 'hover:bg-slate-200'}`}>{ic}<span className="text-[10px]">{lb}</span></button>
+                ))}
+              </div>
+              <span className="text-[10px] text-slate-500 font-medium">Tools</span>
+            </div>
+            <div className="flex flex-col items-center border-r border-slate-200 pr-4">
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded border border-slate-200 mb-1">
+                {['#1e293b', '#b91c1c', '#15803d', '#1d4ed8', '#b45309', '#7c3aed', '#db2777', '#000000'].map((c) => (
+                  <button key={c} aria-label={`Colour ${c}`} onClick={() => { setShapeStroke(c); if (selectedShapeId) updateSelectedProperty('strokeColor', c); }} className={`w-5 h-5 rounded-full border ${shapeStroke === c ? 'scale-125 border-slate-900 shadow' : 'border-slate-300'}`} style={{ backgroundColor: c }} />
+                ))}
+              </div>
+              <span className="text-[10px] text-slate-500 font-medium">Colour</span>
+            </div>
+            <div className="flex flex-col items-center border-r border-slate-200 pr-4">
+              <input type="range" min={1} max={8} value={shapeStrokeWidth} onChange={e => setShapeStrokeWidth(Number(e.target.value))} aria-label="Line width" className="w-24 mb-1" />
+              <span className="text-[10px] text-slate-500 font-medium">Line width</span>
+            </div>
+            <button onClick={clearDrawing} className="px-3 py-1.5 rounded bg-red-50 text-red-600 border border-red-200 font-semibold flex items-center gap-1"><Trash2 className="w-4 h-4"/> Clear drawings</button>
+          </div>
+        )}
+
+        {activeTab === 'Voice' && (
+          <div className="flex items-stretch gap-4 flex-wrap">
+            <div className="flex flex-col gap-1 border-r border-slate-200 pr-4">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Dictate notes (speech to text)</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {!dict.supported ? (
+                  <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 max-w-[220px]">Voice input is not available in this browser (try Chrome/Edge). You can still type in Edit mode.</span>
+                ) : dict.state === 'listening' || dict.state === 'starting' ? (
+                  <>
+                    <button onClick={dict.pause} className="px-2 py-1.5 rounded bg-slate-200 font-semibold flex items-center gap-1"><Pause className="w-3.5 h-3.5"/> Pause</button>
+                    <button onClick={dict.stop} className="px-2 py-1.5 rounded bg-red-600 text-white font-semibold flex items-center gap-1"><StopSquare className="w-3.5 h-3.5"/> Stop</button>
+                    <span className="text-red-600 animate-pulse">● listening</span>
+                  </>
+                ) : dict.state === 'paused' ? (
+                  <>
+                    <button onClick={dict.resume} className="px-2 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Mic className="w-3.5 h-3.5"/> Resume</button>
+                    <button onClick={dict.cancel} className="px-2 py-1.5 rounded bg-slate-200 font-semibold">Cancel</button>
+                  </>
+                ) : (
+                  <button onClick={startDictation} className="px-3 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Mic className="w-3.5 h-3.5"/> Start dictation</button>
+                )}
+                <select value={dict.lang} onChange={e => dict.setLang(e.target.value)} aria-label="Dictation language" className="border rounded px-1.5 py-1">
+                  {SPEECH_LANGS.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                </select>
+              </div>
+              <button onClick={() => setShowEquation(true)} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold flex items-center gap-1 w-fit"><Sigma className="w-3.5 h-3.5"/> Equation Dictation</button>
+              {dict.error && <span className="text-red-600 max-w-[260px]">{dict.error}</span>}
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Read aloud (text to speech)</span>
+              {!reader.supported ? <span className="text-amber-700">Text-to-speech is not supported in this browser.</span> : (
+                <>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <button onClick={playPage} className="px-2.5 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Play className="w-3.5 h-3.5"/> Page</button>
+                    <button onClick={readSelection} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">Selection</button>
+                    <button onClick={readParagraph} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">Paragraph</button>
+                    <button onClick={readSection} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">Section</button>
+                    <span className="w-px h-6 bg-slate-300 mx-1" />
+                    <button onClick={reader.prev} disabled={reader.state === 'idle'} aria-label="Previous sentence" className="p-1.5 rounded bg-slate-100 border disabled:opacity-40"><SkipBack className="w-3.5 h-3.5"/></button>
+                    {reader.state === 'playing'
+                      ? <button onClick={reader.pause} aria-label="Pause" className="p-1.5 rounded bg-slate-100 border"><Pause className="w-3.5 h-3.5"/></button>
+                      : <button onClick={reader.resume} disabled={reader.state !== 'paused'} aria-label="Resume" className="p-1.5 rounded bg-slate-100 border disabled:opacity-40"><Play className="w-3.5 h-3.5"/></button>}
+                    <button onClick={reader.next} disabled={reader.state === 'idle'} aria-label="Next sentence" className="p-1.5 rounded bg-slate-100 border disabled:opacity-40"><SkipForward className="w-3.5 h-3.5"/></button>
+                    <button onClick={reader.replay} disabled={reader.state === 'idle'} aria-label="Replay sentence" className="p-1.5 rounded bg-slate-100 border disabled:opacity-40"><RotateCcw className="w-3.5 h-3.5"/></button>
+                    <button onClick={reader.stop} disabled={reader.state === 'idle'} aria-label="Stop" className="p-1.5 rounded bg-red-600 text-white disabled:opacity-40"><StopSquare className="w-3.5 h-3.5"/></button>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label className="flex items-center gap-1">Speed <input type="range" min={0.5} max={2} step={0.1} value={reader.rate} onChange={e => reader.setRate(Number(e.target.value))} className="w-20" /> {reader.rate.toFixed(1)}×</label>
+                    <select value={reader.voiceName} onChange={e => reader.setVoice(e.target.value)} aria-label="Voice" className="border rounded px-1.5 py-1 max-w-[150px]">
+                      <option value="">Default voice</option>
+                      {reader.voices.map(v => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
+                    </select>
+                    <select value={reader.lang} onChange={e => reader.setLang(e.target.value)} aria-label="Speech language" className="border rounded px-1.5 py-1">
+                      <option value="">Any language</option>
+                      {SPEECH_LANGS.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+                    </select>
+                    {reader.state !== 'idle' && <span className="text-slate-500">Sentence {Math.max(reader.index, 0) + 1} / {reader.count}</span>}
+                  </div>
+                  {reader.state !== 'idle' && <div className="h-1 bg-slate-200 rounded"><div className="h-1 bg-amber-600 rounded" style={{ width: `${((Math.max(reader.index, 0) + 1) / Math.max(reader.count, 1)) * 100}%` }} /></div>}
+                  {reader.error && <span className="text-red-600">{reader.error}</span>}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'AI Assistant' && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <Wand2 className="w-4 h-4 text-amber-600" />
+            {AI_ACTIONS.map(a => (
+              <button key={a.id} disabled={aiBusy} onClick={() => runAi(a)} className="px-2.5 py-1.5 rounded bg-slate-100 hover:bg-amber-100 border border-slate-200 font-semibold disabled:opacity-50">{a.label}</button>
+            ))}
+            <span className="text-[11px] text-slate-500">Select text on the page first to work on just that part.</span>
           </div>
         )}
 
@@ -485,7 +696,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
             <Activity className="w-5 h-5 text-blue-600" />
             <div>
               <p className="font-bold text-slate-900">Interactive Visual Learning Studio</p>
-              <p className="text-[11px] text-slate-500">Explore physics simulations and dynamic parameter controls live.</p>
+              <p className="text-[11px] text-slate-500">Open a simulation, change its controls, then use <b>Add to Notebook</b> to save it on this page.</p>
             </div>
           </div>
         )}
@@ -541,19 +752,10 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
           </div>
         )}
 
-        <div className="flex items-center gap-3 bg-slate-900 text-white px-4 py-2 rounded-xl border border-slate-700 ml-auto shadow-md">
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <button onClick={() => speakText(`${activeTitle}. ${currentSection.heading}. ${currentSection.content}`)} className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded text-xs font-semibold flex items-center gap-1">
-            <Volume2 className="w-3.5 h-3.5"/> Play Page
-          </button>
-          {isPlaying && (
-            <button onClick={() => { window.speechSynthesis.cancel(); setIsPlaying(false); }} className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs font-semibold">Stop</button>
-          )}
-        </div>
       </div>
 
       {/* 4. WORKSPACE / VIEW RENDERER */}
-      <div className="flex-1 overflow-y-auto p-8 flex justify-center items-start pb-16 bg-slate-200">
+      <div className="print-scroll flex-1 overflow-y-auto p-8 flex justify-center items-start pb-16 bg-slate-200">
         
         {/* RENDER THE ISOLATED VISUALIZER COMPONENT */}
         {activeTab === 'Visuals' ? (
@@ -573,13 +775,13 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
           </div>
         ) : (
           /* Normal Notebook Page View */
-          <div className={`w-[850px] min-h-[1100px] shadow-2xl rounded-sm border border-amber-200/80 relative overflow-hidden transition-colors ${getPaperBackground()}`}>
+          <div className={`select-text w-[850px] min-h-[1100px] shadow-2xl rounded-sm border border-amber-200/80 relative overflow-hidden transition-colors ${getPaperBackground()}`}>
             <div className="absolute left-16 top-0 bottom-0 w-[1px] bg-red-300/60 pointer-events-none z-0"></div>
 
             <div className="p-16 relative z-0 space-y-6 text-slate-900">
               <div className="border-b-2 border-slate-800/20 pb-4 flex items-center justify-between">
                 <div>
-                  <h1 className="text-3xl font-bold tracking-tight">{activeTitle}</h1>
+                  <h1 className="text-3xl font-bold tracking-tight">{renderSent({ id: 't-0', text: activeTitle })}</h1>
                   <p className="text-xs opacity-70 mt-1">Page {currentPage} of {totalPages}</p>
                 </div>
                 <button
@@ -592,37 +794,38 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
 
               <div className="space-y-6">
                 <div className="p-5 rounded-xl border-l-4 border-amber-600 bg-amber-500/10">
-                  <h3 className="font-bold text-lg">{currentSection.heading}</h3>
-                  <p className="text-base leading-relaxed">{currentSection.content}</p>
+                  <h3 className="font-bold text-lg">{headingS.map(renderSent)}</h3>
+                  <p className="text-base leading-relaxed">{contentS.map(renderSent)}</p>
                 </div>
               </div>
 
               {/* Student Typed Notes with autosave */}
               <div className="mt-4 pt-2 relative">
                 {inputMode === 'keyboard' ? (
-                  <textarea
-                    value={pageTypedText[currentPage] || ''}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setPageTypedText(prev => ({ ...prev, [currentPage]: val }));
-                      try {
-                        localStorage.setItem(`notesmaker_text_${activeTitle}`, JSON.stringify({ ...pageTypedText, [currentPage]: val }));
-                      } catch (e) {
-                        void e;
-                      }
-                    }}
-                    placeholder="Type student notes, hypotheses, and conclusions here..."
-                    className="w-full text-slate-900 text-base font-sans p-3 bg-amber-50/30 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-y leading-relaxed min-h-[140px]"
-                  />
+                  <div>
+                    <textarea
+                      ref={notesRef}
+                      value={pageTypedText[currentPage] || ''}
+                      onChange={(e) => { caretRef.current = e.target.selectionStart; setNotesFor(currentPage, e.target.value); }}
+                      onSelect={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+                      onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+                      onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+                      placeholder="Type notes here, or use the Voice tab to dictate. Math: $x^2$"
+                      className="w-full text-slate-900 text-base font-sans p-3 bg-amber-50/30 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-y leading-relaxed min-h-[140px]"
+                    />
+                    {dict.interim && <p className="text-xs text-slate-500 italic mt-1">Hearing: {dict.interim}</p>}
+                    <button onClick={() => setInputMode('read')} className="mt-2 text-xs font-semibold px-3 py-1.5 rounded bg-slate-800 text-white">Done editing — read mode</button>
+                  </div>
                 ) : (
-                  <div
-                    onClick={() => setInputMode('keyboard')}
-                    className="w-full text-slate-900 text-base font-sans whitespace-pre-wrap select-text cursor-text"
-                    style={{ lineHeight: '30px', minHeight: '120px' }}
-                  >
-                    {(pageTypedText[currentPage] || 'Click here or select Type mode above to write notes...').split('\n').map((line, idx) => (
-                      <div key={idx} className="px-1"><span>{line || '\u00A0'}</span></div>
+                  <div className="w-full text-slate-900 text-base font-sans whitespace-pre-wrap" style={{ lineHeight: '30px', minHeight: '120px' }}>
+                    {(pageTypedText[currentPage] || '').trim() === '' ? (
+                      <button onClick={() => setInputMode('keyboard')} className="text-slate-400 italic">No notes yet. Click here to write, or dictate from the Voice tab.</button>
+                    ) : noteLines.map((sents, li) => (
+                      <div key={li} className="px-1">{sents.length ? sents.map(renderSent) : '\u00A0'}</div>
                     ))}
+                    {(pageTypedText[currentPage] || '').trim() !== '' && inputMode === 'read' && (
+                      <button onClick={() => setInputMode('keyboard')} className="no-print mt-2 text-xs font-semibold px-3 py-1 rounded border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100">Edit notes</button>
+                    )}
                   </div>
                 )}
               </div>
@@ -784,16 +987,37 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       </div>
 
       {/* 5. FOOTER */}
-      <div className="h-10 bg-white border-t border-slate-300 px-8 flex items-center justify-between text-xs text-slate-700 z-30">
+      <div className="no-print h-10 bg-white border-t border-slate-300 px-8 flex items-center justify-between text-xs text-slate-700 z-30">
         <div className="flex items-center gap-2">
           <button disabled={currentPage === 1} onClick={() => setCurrentPage(c => c - 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronLeft className="w-4 h-4"/></button>
           <span className="font-semibold">Page {currentPage} of {totalPages}</span>
           <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(c => c + 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronRight className="w-4 h-4"/></button>
         </div>
         <div className="text-slate-500">
-          {activeTab === 'Visuals' ? "Kinematics Engine: Adjust the angle and click Launch." : "Click text to speak."}
+          {activeTab === 'Visuals' ? 'Simulation Studio' : inputMode === 'read' ? 'Click any sentence to hear it from there.' : inputMode === 'keyboard' ? 'Editing notes' : 'Drawing'}
         </div>
       </div>
+
+      {showEquation && <EquationDictation onClose={() => setShowEquation(false)} onInsert={(latex) => insertAtCaret('', before => `${before && !/[\s\n]$/.test(before) ? ' ' : ''}$${latex}$ `)} />}
+
+      {(aiBusy || aiOut || aiErr) && (
+        <div className="no-print fixed right-4 bottom-14 w-[26rem] max-h-[70vh] overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl z-40 p-4 text-slate-800">
+          <div className="flex items-center justify-between mb-2">
+            <b className="text-sm">{aiTitle}</b>
+            <button onClick={() => { setAiOut(''); setAiErr(''); }} aria-label="Close" className="p-1 hover:bg-slate-100 rounded"><X className="w-4 h-4"/></button>
+          </div>
+          {aiBusy && !aiOut && <p className="text-xs text-slate-500">Thinking…</p>}
+          {aiErr && <p className="text-xs text-red-600">{aiErr}</p>}
+          {aiOut && <MarkdownView text={aiOut} />}
+          {aiOut && !aiBusy && (
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <button onClick={() => insertAtCaret('', before => `${before && !before.endsWith('\n') ? '\n' : ''}\n${aiOut}\n`)} className="px-2.5 py-1.5 rounded bg-emerald-600 text-white text-xs font-semibold">Insert into notes</button>
+              <button onClick={() => reader.playFrom(splitSentences(aiOut).map((t, i) => ({ id: `ai-${i}`, text: t })), 0)} className="px-2.5 py-1.5 rounded bg-slate-100 border text-xs font-semibold flex items-center gap-1"><Volume2 className="w-3.5 h-3.5"/> Read aloud</button>
+              <button onClick={() => { try { void navigator.clipboard.writeText(aiOut); } catch { /* clipboard blocked */ } }} className="px-2.5 py-1.5 rounded bg-slate-100 border text-xs font-semibold flex items-center gap-1"><Copy className="w-3.5 h-3.5"/> Copy</button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

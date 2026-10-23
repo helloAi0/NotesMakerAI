@@ -6,3 +6,9 @@ body {
   @apply bg-amber-50 text-slate-900 antialiased;
   font-family: system-ui, -apple-system, sans-serif;
 }
+
+@media print {
+  .no-print { display: none !important; }
+  .print-root, .print-scroll { height: auto !important; overflow: visible !important; }
+  .print-scroll { padding: 0 !important; background: white !important; }
+}
