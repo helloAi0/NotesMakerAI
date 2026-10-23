@@ -47,7 +47,7 @@ function eig2(a: number, b: number, c: number, d: number) {
 function jacobiEig(Ain: number[][]) {
   const n = Ain.length;
   const A = Ain.map(r => r.slice());
-  const V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  const V = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j): number => (i === j ? 1 : 0)));
   for (let sweep = 0; sweep < 60; sweep++) {
     let off = 0;
     for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) off += A[i][j] * A[i][j];
