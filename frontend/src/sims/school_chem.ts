@@ -71,7 +71,7 @@ export const bohrH = defineSim<BohrS>({
     }
   },
   readouts(s) {
-    const Ei = -RYD / (s.ni * s.ni), Ef = -RYD / (s.nf * s.nf), dE = Math.abs(Ef - Ei), lam = dE > 0 ? HC / dE : NaN;
+    const Ei = -RYD / (s.ni * s.ni), Ef = -RYD / (s.nf * s.nf), dE = Math.abs(Ef - Ei), lam: number | string = dE > 0 ? HC / dE : 'none (nᵢ = n_f, no photon)';
     const series = s.nf === 1 ? 'Lyman (UV)' : s.nf === 2 ? 'Balmer (visible)' : s.nf === 3 ? 'Paschen (IR)' : s.nf === 4 ? 'Brackett (IR)' : 'Pfund / higher (IR)';
     return [
       { label: 'E at nᵢ', value: Ei, unit: 'eV', digits: 2 }, { label: 'E at n_f', value: Ef, unit: 'eV', digits: 2 },
@@ -135,7 +135,7 @@ export const equilibrium = defineSim<EqS>({
     const K = num(v, 'kf') / num(v, 'kr'), Q = s.A * s.B > 1e-9 ? s.Cc / (s.A * s.B) : Infinity;
     const rf = num(v, 'kf') * s.A * s.B, rr = num(v, 'kr') * s.Cc;
     return [{ label: '[A]', value: s.A, unit: 'M', digits: 3 }, { label: '[B]', value: s.B, unit: 'M', digits: 3 }, { label: '[C]', value: s.Cc, unit: 'M', digits: 3 },
-      { label: 'K = kf/kr', value: K, digits: 2 }, { label: 'Q', value: Q, digits: 2 }, { label: 'Forward rate', value: rf, unit: 'M/s', digits: 3 }, { label: 'Reverse rate', value: rr, unit: 'M/s', digits: 3 }];
+      { label: 'K = kf/kr', value: K, digits: 2 }, { label: 'Q', value: Number.isFinite(Q) ? Q : 'not defined (no A or B left)', digits: 2 }, { label: 'Forward rate', value: rf, unit: 'M/s', digits: 3 }, { label: 'Reverse rate', value: rr, unit: 'M/s', digits: 3 }];
   },
   equations(s, v) {
     const K = num(v, 'kf') / num(v, 'kr');

@@ -334,7 +334,7 @@ export const rcfilter = defineSim<RfS>({
   init() { return { t: 0, vc: 0, hist: [], acc: 0 }; },
   step(s, v, dt) {
     const f = num(v, 'f'), vin = ((s.t * f) % 1) < 0.5 ? 1 : 0, tau = num(v, 'R') * 1e3 * num(v, 'Cn') * 1e-9;
-    s.vc += ((vin - s.vc) / tau) * Math.min(dt, tau / 5); if (dt > tau / 5) s.vc += ((vin - s.vc) / tau) * (dt - tau / 5);
+    s.vc = vin + (s.vc - vin) * Math.exp(-dt / tau); // exact solution over one step: stable for any tau/dt
     s.t += dt; s.acc += dt; if (s.acc > 1 / (f * 250)) { s.acc = 0; s.hist.push({ t: s.t, vin, vo: str(v, 'mode') === 'lp' ? s.vc : vin - s.vc }); if (s.hist.length > 1100) s.hist.shift(); }
   },
   draw(c, s, v, w, h) {

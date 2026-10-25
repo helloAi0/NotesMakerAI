@@ -278,7 +278,7 @@ export const seismic = defineSim<SeS>({
   },
   readouts(s, v) {
     const sx = s as unknown as { ex?: number }; void sx; const vp = num(v, 'vp'), vs = num(v, 'vs');
-    return [{ label: 'Distance per second of S-P lag', value: vp * vs / (vp - vs), unit: 'km/s', digits: 2 }, { label: 'Elapsed (model time)', value: s.running ? s.t : 0, unit: 's', digits: 1 }, { label: 'P/S speed ratio', value: vp / vs, digits: 2 }];
+    return [{ label: 'Distance per second of S-P lag', value: vp - vs > 1e-9 ? vp * vs / (vp - vs) : 'infinite (vp = vs: no S–P lag)', unit: vp - vs > 1e-9 ? 'km/s' : '', digits: 2 }, { label: 'Elapsed (model time)', value: s.running ? s.t : 0, unit: 's', digits: 1 }, { label: 'P/S speed ratio', value: vp / vs, digits: 2 }];
   },
   equations(_s, v) { const vp = num(v, 'vp'), vs = num(v, 'vs'); return ['d = (t_S - t_P)\\,\\dfrac{v_P v_S}{v_P - v_S}', `d = ${fmt(vp * vs / (vp - vs), 2)}\\,(t_S - t_P)\\ \\text{km}`]; },
 });

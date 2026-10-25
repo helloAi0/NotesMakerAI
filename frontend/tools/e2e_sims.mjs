@@ -13,7 +13,7 @@ const nPlanned = await pg.locator('text=PLANNED').count(); check('planned topics
 await pg.selectOption('select >> nth=2', 'planned').catch(()=>{});
 await pg.selectOption('xpath=(//select)[3]', 'working');
 await pg.fill('input[placeholder="Search topics…"]','Kalman');
-check('search finds Kalman only', (await pg.locator('text=WORKING').count())===1 && await pg.isVisible('button:has-text("Kalman")'));
+check('search finds Kalman only', (await pg.locator('span:text-is("WORKING")').count())===1 && await pg.isVisible('button:has-text("Kalman")'));
 await pg.click('button:has-text("Kalman")'); await pg.waitForTimeout(800);
 check('sim opened from coverage', await pg.isVisible('text=Kalman Filter'));
 check('Back to Simulation Library visible', await pg.isVisible('button:has-text("Back to Simulation Library")'));

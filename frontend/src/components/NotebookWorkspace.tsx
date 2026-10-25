@@ -13,6 +13,7 @@ import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../
 
 // IMPORT SIMULATION & EXPERIMENT COMPONENTS
 import VisualsStudio from './VisualsStudio';
+import MicTest from './MicTest';
 import ExperimentCard from './ExperimentCard';
 import { loadAllExperiments, deleteExperimentRecord, type ExperimentRecord } from '../lib/experimentStore';
 import type { Values } from '../sims/types';
@@ -505,22 +506,22 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     <div className="print-root flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 font-sans">
       
       {/* 1. TOP TITLE BAR */}
-      <div className="no-print bg-[#1e293b] text-white px-4 py-1 flex items-center justify-between text-xs h-9">
-        <div className="flex items-center gap-4">
-          <span className="font-bold text-amber-400 text-sm">Notes Maker AI</span>
-          <label className="flex items-center gap-1 cursor-pointer border-l border-slate-600 pl-4">
+      <div className="no-print bg-[#1e293b] text-white px-2 md:px-4 py-1 flex items-center justify-between gap-2 text-xs min-h-9">
+        <div className="flex items-center gap-2 md:gap-4 min-w-0">
+          <span className="font-bold text-amber-400 text-sm whitespace-nowrap hidden sm:inline">Notes Maker AI</span>
+          <label className="flex items-center gap-1 cursor-pointer sm:border-l border-slate-600 sm:pl-4 whitespace-nowrap">
             <input type="checkbox" checked={autoSave} onChange={(e) => setAutoSave(e.target.checked)} className="w-3 h-3 accent-amber-500" />
             AutoSave
           </label>
-          <div className="flex items-center gap-1 border-l border-slate-600 pl-4">
+          <div className="flex items-center gap-1 border-l border-slate-600 pl-2 md:pl-4">
             <button onClick={undo} disabled={historyIndex <= 0} title="Undo shape change" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Undo2 className="w-3.5 h-3.5"/></button>
             <button onClick={redo} disabled={historyIndex >= history.length - 1} title="Redo shape change" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Redo2 className="w-3.5 h-3.5"/></button>
           </div>
         </div>
-        <span className="font-semibold text-slate-300 truncate mx-4">{activeTitle}</span>
-        <div className="flex items-center gap-3">
+        <span className="font-semibold text-slate-300 truncate mx-4 hidden md:inline">{activeTitle}</span>
+        <div className="flex items-center gap-2 md:gap-3 shrink-0">
           <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${saveStatus === 'Saved' ? 'bg-emerald-600' : 'bg-amber-600'}`}>{saveStatus}</span>
-          <button onClick={() => window.print()} className="bg-amber-600 px-3 py-1 rounded font-medium hover:bg-amber-700 flex items-center gap-1"><Printer className="w-3 h-3"/> Print / Save PDF</button>
+          <button onClick={() => window.print()} className="bg-amber-600 px-3 py-1 rounded font-medium hover:bg-amber-700 flex items-center gap-1"><Printer className="w-3 h-3"/> <span className="hidden sm:inline">Print / Save PDF</span><span className="sm:hidden">PDF</span></button>
         </div>
       </div>
 
@@ -641,6 +642,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
               </div>
               <button onClick={() => setShowEquation(true)} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold flex items-center gap-1 w-fit"><Sigma className="w-3.5 h-3.5"/> Equation Dictation</button>
               {dict.error && <span className="text-red-600 max-w-[260px]">{dict.error}</span>}
+              <MicTest />
             </div>
 
             <div className="flex flex-col gap-1">
@@ -755,7 +757,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       </div>
 
       {/* 4. WORKSPACE / VIEW RENDERER */}
-      <div className="print-scroll flex-1 overflow-y-auto p-8 flex justify-center items-start pb-16 bg-slate-200">
+      <div className="print-scroll flex-1 overflow-y-auto p-2 md:p-8 flex justify-center items-start pb-16 bg-slate-200">
         
         {/* RENDER THE ISOLATED VISUALIZER COMPONENT */}
         {activeTab === 'Visuals' ? (
@@ -775,13 +777,13 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
           </div>
         ) : (
           /* Normal Notebook Page View */
-          <div className={`select-text w-[850px] min-h-[1100px] shadow-2xl rounded-sm border border-amber-200/80 relative overflow-hidden transition-colors ${getPaperBackground()}`}>
-            <div className="absolute left-16 top-0 bottom-0 w-[1px] bg-red-300/60 pointer-events-none z-0"></div>
+          <div className={`select-text w-full max-w-[850px] min-h-[1100px] shadow-2xl rounded-sm border border-amber-200/80 relative overflow-hidden transition-colors ${getPaperBackground()}`}>
+            <div className="absolute left-6 md:left-16 top-0 bottom-0 w-[1px] bg-red-300/60 pointer-events-none z-0"></div>
 
-            <div className="p-16 relative z-0 space-y-6 text-slate-900">
-              <div className="border-b-2 border-slate-800/20 pb-4 flex items-center justify-between">
+            <div className="p-6 pl-10 md:p-16 relative z-0 space-y-6 text-slate-900">
+              <div className="border-b-2 border-slate-800/20 pb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h1 className="text-3xl font-bold tracking-tight">{renderSent({ id: 't-0', text: activeTitle })}</h1>
+                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{renderSent({ id: 't-0', text: activeTitle })}</h1>
                   <p className="text-xs opacity-70 mt-1">Page {currentPage} of {totalPages}</p>
                 </div>
                 <button
@@ -987,13 +989,13 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       </div>
 
       {/* 5. FOOTER */}
-      <div className="no-print h-10 bg-white border-t border-slate-300 px-8 flex items-center justify-between text-xs text-slate-700 z-30">
+      <div className="no-print h-10 bg-white border-t border-slate-300 px-3 md:px-8 flex items-center justify-between text-xs text-slate-700 z-30">
         <div className="flex items-center gap-2">
           <button disabled={currentPage === 1} onClick={() => setCurrentPage(c => c - 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronLeft className="w-4 h-4"/></button>
           <span className="font-semibold">Page {currentPage} of {totalPages}</span>
           <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(c => c + 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronRight className="w-4 h-4"/></button>
         </div>
-        <div className="text-slate-500">
+        <div className="text-slate-500 truncate ml-2 hidden sm:block">
           {activeTab === 'Visuals' ? 'Simulation Studio' : inputMode === 'read' ? 'Click any sentence to hear it from there.' : inputMode === 'keyboard' ? 'Editing notes' : 'Drawing'}
         </div>
       </div>
@@ -1001,7 +1003,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       {showEquation && <EquationDictation onClose={() => setShowEquation(false)} onInsert={(latex) => insertAtCaret('', before => `${before && !/[\s\n]$/.test(before) ? ' ' : ''}$${latex}$ `)} />}
 
       {(aiBusy || aiOut || aiErr) && (
-        <div className="no-print fixed right-4 bottom-14 w-[26rem] max-h-[70vh] overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl z-40 p-4 text-slate-800">
+        <div className="no-print fixed right-2 md:right-4 bottom-14 w-[calc(100vw-1rem)] max-w-[26rem] max-h-[70vh] overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl z-40 p-4 text-slate-800">
           <div className="flex items-center justify-between mb-2">
             <b className="text-sm">{aiTitle}</b>
             <button onClick={() => { setAiOut(''); setAiErr(''); }} aria-label="Close" className="p-1 hover:bg-slate-100 rounded"><X className="w-4 h-4"/></button>
