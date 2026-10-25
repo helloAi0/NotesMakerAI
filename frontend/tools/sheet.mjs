@@ -1,6 +1,6 @@
 // Contact sheet screenshot: node tools/sheet.mjs <file> <out.png> [t=3] [w=640] [h=380] [cols=2] [id]
 // Starts its own vite dev server on a free port, renders /sim-lab.html, saves a full-page PNG and prints issues.
-import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+const { chromium } = await import('playwright').catch(() => import('/home/claude/.npm-global/lib/node_modules/playwright/index.mjs'));
 import { spawn } from 'node:child_process';
 const [file, out, t = '3', w = '640', h = '380', cols = '2', id = ''] = process.argv.slice(2);
 const port = 5300 + Math.floor(Math.random() * 600);

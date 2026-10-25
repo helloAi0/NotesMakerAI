@@ -1,4 +1,4 @@
-import { chromium } from '/home/claude/.npm-global/lib/node_modules/playwright/index.mjs';
+const { chromium } = await import('playwright').catch(() => import('/home/claude/.npm-global/lib/node_modules/playwright/index.mjs'));
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(()=>chromium.launch());
 const pg = await b.newPage({ viewport: { width: 1400, height: 900 } });
 const errs=[]; pg.on('pageerror', e=>errs.push(e.message)); pg.on('console', m=>{ if(m.type()==='error') errs.push(m.text()); });
@@ -11,7 +11,7 @@ await pg.addInitScript(() => {
   window.SpeechSynthesisUtterance = function(t){ this.text=t; };
   window.SpeechRecognition = function(){ const r=this; r.start=()=>{ window.__recs.push(r); window.__started=(window.__started||0)+1; setTimeout(()=>r.onstart&&r.onstart(),0); }; r.stop=()=>{ setTimeout(()=>r.onend&&r.onend(),0); }; r.abort=r.stop; };
 });
-await pg.goto('http://localhost:5199/'); await pg.waitForTimeout(800);
+await pg.goto((process.env.BASE || 'http://localhost:5199') + '/'); await pg.waitForTimeout(800);
 const check=(n,ok)=>console.log(ok?'PASS':'FAIL',n);
 check('mic not opened on load', !(await pg.evaluate(()=>window.__started)));
 // click-to-speak
@@ -49,7 +49,7 @@ await pg.locator('[data-seg^=n]').nth(idx).click(); await pg.waitForTimeout(200)
 sp = await pg.evaluate(()=>window.__spoken); console.log('last spoken:', sp.at(-1));
 check('equation spoken as words', /one over x plus one/i.test(sp.at(-1)));
 // refresh persistence
-await pg.reload(); await pg.waitForTimeout(600);
+await pg.reload(); await pg.waitForSelector('[data-seg]',{timeout:45000}); await pg.waitForTimeout(600);
 check('notes persist after refresh', (await pg.locator('body').innerText()).includes('Force equals mass'));
 await pg.screenshot({path:'/tmp/nb.png'});
 // ribbon tabs have no dead buttons: click each
