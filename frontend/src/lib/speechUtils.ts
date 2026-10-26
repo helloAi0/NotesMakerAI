@@ -159,6 +159,7 @@ export class SpeechEngine {
 
   /** Changing rate/voice mid-sentence restarts that sentence so the change is heard at once. */
   setRate(r: number) { this.rate = Math.max(0.5, Math.min(2, r)); this.restartIfActive(); }
+  setPitch(p: number) { this.pitch = Math.max(0.5, Math.min(1.8, p)); this.restartIfActive(); }
   setVoice(name: string) { this.voiceName = name; this.restartIfActive(); }
   setLang(l: string) { this.lang = l; if (!this.voiceName || !this.getVoices().find(v => v.name === this.voiceName && v.lang.toLowerCase().startsWith(l.split('-')[0].toLowerCase()))) this.voiceName = ''; this.restartIfActive(); }
   setVolume(v: number) { this.volume = Math.max(0, Math.min(1, v)); }

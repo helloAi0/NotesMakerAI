@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node tools/gen-sw.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "smoke": "tsx tools/smoke.mts",

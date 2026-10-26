@@ -14,6 +14,9 @@ import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../
 // IMPORT SIMULATION & EXPERIMENT COMPONENTS
 import VisualsStudio from './VisualsStudio';
 import MicTest from './MicTest';
+import VoicePicker from './VoicePicker';
+import { register } from '../lib/agentBus';
+import { looksLikeCommand } from '../lib/voiceIntents';
 import ExperimentCard from './ExperimentCard';
 import { loadAllExperiments, deleteExperimentRecord, type ExperimentRecord } from '../lib/experimentStore';
 import type { Values } from '../sims/types';
@@ -396,8 +399,11 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     });
   };
   const dict = useDictation(text => {
+    // While dictating, an utterance that starts with a wake word ("computer, open the Kalman filter") is a command, not note text.
+    if (looksLikeCommand(text)) { void import('../lib/agentRuntime').then(m => m.runCommand(text)); return; }
     insertAtCaret('', before => applyVoiceCommands(text, before.slice(-1)));
   });
+  useEffect(() => { const stop = () => dict.stop(); window.addEventListener('nm:stop-dictation', stop); return () => window.removeEventListener('nm:stop-dictation', stop); }, [dict]);
   const startDictation = () => {
     setInputMode('keyboard');
     setActiveTab('Voice');
@@ -434,6 +440,21 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const readSection = () => reader.playFrom([...headingS, ...contentS], 0);
 
   useEffect(() => { reader.stop(); }, [currentPage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Expose the notebook to the voice agent / help-bot (insert text, read aloud, change page, search my notes).
+  const nbLive = useRef({ activeTitle, totalPages, insertAtCaret, playPage, stop: reader.stop });
+  nbLive.current = { activeTitle, totalPages, insertAtCaret, playPage, stop: reader.stop };
+  useEffect(() => register('notebook', {
+    title: () => nbLive.current.activeTitle,
+    page: () => pageRef.current,
+    insert: t => nbLive.current.insertAtCaret('', before => `${before && !before.endsWith('\n') ? '\n' : ''}${t.trim()}\n`),
+    getText: () => textRef.current[pageRef.current] || '',
+    allPages: () => Object.entries(textRef.current).map(([p, tx]) => ({ title: nbLive.current.activeTitle, page: Number(p), text: tx })),
+    readAloud: () => nbLive.current.playPage(),
+    stopReading: () => nbLive.current.stop(),
+    gotoPage: n => setCurrentPage(Math.min(Math.max(1, n), nbLive.current.totalPages)),
+    setMode: m => setInputMode(m === 'read' ? 'read' : 'keyboard'),
+  }), []);
   useEffect(() => {
     if (!reader.segId) return;
     document.querySelector(`[data-seg="${reader.segId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -664,15 +685,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                     <button onClick={reader.stop} disabled={reader.state === 'idle'} aria-label="Stop" className="p-1.5 rounded bg-red-600 text-white disabled:opacity-40"><StopSquare className="w-3.5 h-3.5"/></button>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <label className="flex items-center gap-1">Speed <input type="range" min={0.5} max={2} step={0.1} value={reader.rate} onChange={e => reader.setRate(Number(e.target.value))} className="w-20" /> {reader.rate.toFixed(1)}×</label>
-                    <select value={reader.voiceName} onChange={e => reader.setVoice(e.target.value)} aria-label="Voice" className="border rounded px-1.5 py-1 max-w-[150px]">
-                      <option value="">Default voice</option>
-                      {reader.voices.map(v => <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>)}
-                    </select>
-                    <select value={reader.lang} onChange={e => reader.setLang(e.target.value)} aria-label="Speech language" className="border rounded px-1.5 py-1">
-                      <option value="">Any language</option>
-                      {SPEECH_LANGS.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
-                    </select>
+                    <VoicePicker reader={reader} />
                     {reader.state !== 'idle' && <span className="text-slate-500">Sentence {Math.max(reader.index, 0) + 1} / {reader.count}</span>}
                   </div>
                   {reader.state !== 'idle' && <div className="h-1 bg-slate-200 rounded"><div className="h-1 bg-amber-600 rounded" style={{ width: `${((Math.max(reader.index, 0) + 1) / Math.max(reader.count, 1)) * 100}%` }} /></div>}

@@ -1,0 +1,27 @@
+// Offline test of the voice-command parser: npx tsx tools/intents.mts
+import { parseCommand, parseNumber, resolveParam, resolveOption } from '../src/lib/voiceIntents.ts';
+let fail = 0;
+const eq = (name: string, got: unknown, want: unknown) => { const ok = JSON.stringify(got) === JSON.stringify(want); if (!ok) { fail++; console.log('FAIL', name, '\n  got ', JSON.stringify(got), '\n  want', JSON.stringify(want)); } else console.log('ok  ', name); };
+const kinds = (t: string) => parseCommand(t).map(s => s.intent.kind);
+eq('user example chain', kinds('Open AI segmentation -> Go to the image processing module -> Set model to U-Net -> Run simulation'), ['open_sim', 'goto_module', 'set_param', 'run']);
+const ex = parseCommand('Open AI segmentation -> Go to the image processing module -> Set model to U-Net -> Run simulation').map(s => s.intent) as any[];
+eq('open query', ex[0].query, 'ai segmentation'); eq('module name', ex[1].name, 'imageprocessing'); eq('set param', [ex[2].param, ex[2].value], ['model', 'unet']);
+eq('spoken chain "then"', kinds('open the kalman filter then set noise to five and run the simulation'), ['open_sim', 'set_param', 'run']);
+eq('navigate notebook', parseCommand('go to the digital notebook')[0].intent, { kind: 'navigate', view: 'notebook' });
+eq('navigate studio', parseCommand('open visuals studio')[0].intent, { kind: 'navigate', view: 'simulations' });
+eq('close sim', kinds('go back'), ['close_sim']);
+eq('add to notebook', kinds('add this simulation to my notebook'), ['add_to_notebook']);
+eq('pause/reset/step', kinds('pause. reset. step'), ['pause', 'reset', 'step']);
+eq('increase by', parseCommand('increase learning rate by 0.1')[0].intent, { kind: 'adjust_param', param: 'learning rate', dir: 1, amount: '0.1' });
+eq('toggle off', parseCommand('turn off the ellipse')[0].intent, { kind: 'toggle_param', param: 'ellipse', on: false });
+eq('read aloud', kinds('read this page aloud'), ['read_aloud']); eq('stop reading', kinds('stop reading'), ['stop_reading']);
+eq('page 3', parseCommand('go to page three')[0].intent, { kind: 'goto_page', n: 3 });
+eq('insert', parseCommand('write the heat equation is parabolic')[0].intent, { kind: 'insert_text', text: 'the heat equation is parabolic' });
+eq('explain', kinds('explain this simulation'), ['explain']); eq('search', kinds('search for fourier transform'), ['search']);
+eq('press button', parseCommand('press the shuffle button')[0].intent, { kind: 'action', name: 'shuffle' });
+eq('wake word', kinds('computer, open the pid controller'), ['open_sim']);
+eq('numbers', [parseNumber('twenty five'), parseNumber('three point five'), parseNumber('one hundred and twenty'), parseNumber('minus 4'), parseNumber('0.25')], [25, 3.5, 120, -4, 0.25]);
+const params: any[] = [{ kind: 'select', id: 'model', label: 'Segmentation model', value: 'otsu', options: [{ value: 'otsu', label: 'Otsu threshold' }, { value: 'kmeans', label: 'K-means clustering' }, { value: 'unet', label: 'U-Net (toy encoder-decoder)' }] }, { kind: 'number', id: 'noise', label: 'Noise level', min: 0, max: 1, step: 0.05, value: 0.2 }];
+eq('param resolve', resolveParam('model', params)?.id, 'model'); eq('param noise', resolveParam('the noise', params)?.id, 'noise');
+eq('option unet', resolveOption('unet', params[0])?.value, 'unet'); eq('option kmeans', resolveOption('k means', params[0])?.value, 'kmeans');
+console.log(fail ? `${fail} FAILED` : 'ALL PASS'); process.exit(fail ? 1 : 0);

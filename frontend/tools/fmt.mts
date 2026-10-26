@@ -1,0 +1,10 @@
+import { applyVoiceCommands as a } from '../src/lib/useVoice.ts';
+let f = 0; const eq = (n: string, g: string, w: string) => { if (g !== w) { f++; console.log('FAIL', n, JSON.stringify(g), '!=', JSON.stringify(w)); } else console.log('ok  ', n); };
+eq('punct', a('the force equals mass times acceleration period', ''), 'The force equals mass times acceleration.');
+eq('heading', a('heading Newton laws new paragraph force causes acceleration', ''), '# Newton laws\n\nForce causes acceleration');
+eq('bullets', a('key ideas colon bullet inertia bullet momentum', 'x'), ' key ideas:\n- Inertia\n- Momentum');
+eq('numbered', a('steps colon number one mix number two heat', '.'), ' Steps:\n1. Mix\n2. Heat');
+eq('bold', a('this is bold important end bold here', 'x'), ' this is **important** here');
+eq('brackets', a('speed open bracket m per s close bracket', 'x'), ' speed (m per s)');
+eq('percent', a('efficiency is ninety percent', 'x'), ' efficiency is ninety%');
+console.log(f ? f + ' FAILED' : 'ALL PASS');

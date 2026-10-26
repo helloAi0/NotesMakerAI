@@ -1,9 +1,12 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { register } from './lib/agentBus';
+import type { ViewId } from './lib/agentBus';
 
 // Each big screen is its own chunk, downloaded the first time it is opened.
 const NotebookWorkspace = lazy(() => import('./components/NotebookWorkspace'));
 const PdfSourceLibrary = lazy(() => import('./components/PdfSourceLibrary'));
 const VisualsStudio = lazy(() => import('./components/VisualsStudio'));
+const AssistantDock = lazy(() => import('./components/AssistantDock'));
 const Loading = () => <div className="h-full flex items-center justify-center text-sm text-slate-500 p-8">Loading…</div>;
 import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity, Menu, X } from 'lucide-react';
 
@@ -12,6 +15,8 @@ export default function App() {
   const [activeTab, setActiveTabRaw] = useState('notebook');
   const [menuOpen, setMenuOpen] = useState(false);
   const setActiveTab = (t: string) => { setActiveTabRaw(t); setMenuOpen(false); };
+  const viewRef = useRef(activeTab); viewRef.current = activeTab;
+  useEffect(() => register('app', { view: () => viewRef.current as ViewId, navigate: v => { setActiveTabRaw(v); setMenuOpen(false); } }), []);
 
   return (
     <div className="min-h-screen flex bg-[#fbf9f5] font-sans">
@@ -135,6 +140,7 @@ export default function App() {
           )}
         </div>
       </main>
+      <Suspense fallback={null}><AssistantDock /></Suspense>
     </div>
   );
 }

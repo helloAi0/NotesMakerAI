@@ -10,6 +10,7 @@ import { defaultsOf } from '../sims/types';
 import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../lib/aiClient';
 import MarkdownView from './MarkdownView';
 import AddToNotebookDialog from './AddToNotebookDialog';
+import { register } from '../lib/agentBus';
 import DerivationViewer from './DerivationViewer';
 
 const fmtVal = (r: Readout) => {
@@ -168,6 +169,28 @@ export default function SimPlayer({ sim, onBack, initialValues, notebookContext 
     const dt = sim.dt ?? 1 / 240;
     for (let i = 0; i < 12; i++) { sim.step(s, valsRef.current, dt); simTime.current += dt; }
   };
+
+
+  // Let the voice agent / help-bot drive this simulation (set sliders, run, press buttons ...).
+  const liveRef = useRef({ playing, vals });
+  liveRef.current = { playing, vals };
+  useEffect(() => register('sim', {
+    sim,
+    values: () => valsRef.current,
+    setParam: (id, v) => { const p = sim.params.find(x => x.id === id); setParam(id, v, p ? (p as { resetOnChange?: boolean }).resetOnChange : false); },
+    run: () => { rebuild(); setPlaying(true); },
+    play: () => setPlaying(true),
+    pause: () => setPlaying(false),
+    reset: () => rebuild(),
+    step: () => stepOnce(),
+    setSpeed: x => setSpeed(x),
+    doAction: id => { if (stateRef.current == null) return false; sim.action?.(stateRef.current, valsRef.current, id); valsRef.current = { ...valsRef.current }; setVals(valsRef.current); return true; },
+    readouts: () => (stateRef.current == null ? [] : sim.readouts(stateRef.current, valsRef.current).map(r => ({ label: r.label, value: `${fmtVal(r)}${r.unit ? ' ' + r.unit : ''}` }))),
+    equations: () => (stateRef.current == null || !sim.equations ? [] : sim.equations(stateRef.current, valsRef.current)),
+    addToNotebook: () => { setSnapshotUrl(cvRef.current?.toDataURL('image/png')); setShowAddModal(true); },
+    isPlaying: () => liveRef.current.playing,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [sim]);
 
   const point = (e: React.PointerEvent<HTMLCanvasElement>, kind: 'down' | 'move' | 'up') => {
     if (!sim.pointer || stateRef.current == null) return;
