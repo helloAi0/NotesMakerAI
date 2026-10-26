@@ -49,7 +49,7 @@ const POSTGRAD_LEVELS = ['M.Tech', 'M.Sc'];
 function OriginalLibrary({ notebookContext, initialSimId, initialValues, openId, setOpenId }: OriginalLibraryProps & { openId: string | null; setOpenId: (id: string | null) => void }) {
   const [query, setQuery] = useState('');
   const [subject, setSubject] = useState<'All' | SimSubject>('All');
-  const [eduCategory, setEduCategory] = useState<'All' | 'School' | 'Undergraduate' | 'Postgraduate'>('All');
+  const [eduCategory, setEduCategory] = useState<'All' | 'University' | 'School' | 'Undergraduate' | 'Postgraduate'>('University');
   const [eduLevel, setEduLevel] = useState<string>('All');
   const [difficulty, setDifficulty] = useState<'All' | 'Beginner' | 'Intermediate' | 'Advanced'>('All');
 
@@ -68,7 +68,9 @@ function OriginalLibrary({ notebookContext, initialSimId, initialValues, openId,
       // 2. Education Category Filter
       if (eduCategory !== 'All') {
         const levels = x.educationLevels || [];
-        if (eduCategory === 'School') {
+        if (eduCategory === 'University') {
+          if (!levels.some(l => UNDERGRAD_LEVELS.includes(l) || POSTGRAD_LEVELS.includes(l))) return false;
+        } else if (eduCategory === 'School') {
           const matchSchool = levels.some(l => SCHOOL_LEVELS.includes(l));
           if (!matchSchool && levels.length > 0) return false;
         } else if (eduCategory === 'Undergraduate') {
@@ -160,7 +162,7 @@ function OriginalLibrary({ notebookContext, initialSimId, initialValues, openId,
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">Education Level</span>
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
-            {(['All', 'School', 'Undergraduate', 'Postgraduate'] as const).map(cat => (
+            {(['University', 'Undergraduate', 'Postgraduate', 'School', 'All'] as const).map(cat => (
               <button
                 key={cat}
                 type="button"
@@ -174,14 +176,14 @@ function OriginalLibrary({ notebookContext, initialSimId, initialValues, openId,
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {cat === 'All' ? 'All Curricula' : cat}
+                {cat === 'All' ? 'All Curricula' : cat === 'University' ? 'University (UG + PG)' : cat}
               </button>
             ))}
           </div>
         </div>
 
         {/* Sub-level options */}
-        {eduCategory !== 'All' && (
+        {eduCategory !== 'All' && eduCategory !== 'University' && (
           <div className="flex items-center gap-2 flex-wrap text-xs pt-1">
             <span className="text-slate-400 font-medium text-[11px]">Select Class/Degree:</span>
             <button

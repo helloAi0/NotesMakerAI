@@ -298,7 +298,7 @@ export const arrhenius = defineSim<ArS>({
   init() { return { t: 0 }; }, step(s, _v, dt) { s.t += dt; },
   draw(c, s, v, w, h) {
     c.fillStyle = C.bg; c.fillRect(0, 0, w, h);
-    const Ea = (num(v, 'Ea') - (bool(v, 'cat') ? 20 : 0)) * 1000, T = num(v, 'T'), kT = R * T;
+    const Ea = Math.max(1, num(v, 'Ea') - (bool(v, 'cat') ? 20 : 0)) * 1000, T = num(v, 'T'), kT = R * T;
     const P = { x: 8, y: 8, w: w * 0.58, h: h - 16 };
     const Emax = 120000, f = (E: number) => 2 * Math.sqrt(E / Math.PI) * kT ** -1.5 * Math.exp(-E / kT);
     let fm = 0; for (let E = 100; E < Emax; E += 400) fm = Math.max(fm, f(E));
@@ -319,12 +319,12 @@ export const arrhenius = defineSim<ArS>({
     void s;
   },
   readouts(_s, v) {
-    const Ea = (num(v, 'Ea') - (bool(v, 'cat') ? 20 : 0)) * 1000, T = num(v, 'T'), rel = Math.exp(-Ea / (R * T)) / Math.exp(-50000 / (R * 300));
+    const Ea = Math.max(1, num(v, 'Ea') - (bool(v, 'cat') ? 20 : 0)) * 1000, T = num(v, 'T'), rel = Math.exp(-Ea / (R * T)) / Math.exp(-50000 / (R * 300));
     return [{ label: 'Effective Ea', value: Ea / 1000, unit: 'kJ/mol', digits: 0 }, { label: 'Fraction E ≥ Ea', value: fracAbove(Ea, T) * 100, unit: '%', digits: 4 }, { label: 'k / k(300 K, 50 kJ)', value: rel, digits: 3 },
       { label: 'Rate gain for +10 K', value: Math.exp(-Ea / (R * (T + 10))) / Math.exp(-Ea / (R * T)), digits: 2 }];
   },
   equations(_s, v) {
-    const Ea = (num(v, 'Ea') - (bool(v, 'cat') ? 20 : 0)) * 1000, T = num(v, 'T');
+    const Ea = Math.max(1, num(v, 'Ea') - (bool(v, 'cat') ? 20 : 0)) * 1000, T = num(v, 'T');
     return ['k = A\\, e^{-E_a/RT}', `e^{-E_a/RT} = e^{-${fmt(Ea / 1000, 0)}\\,000/(8.314\\times ${T})} = ${fmt(Math.exp(-Ea / (R * T)), 6)}`, '\\ln k = \\ln A - \\dfrac{E_a}{R}\\cdot\\dfrac{1}{T}'];
   },
 });
