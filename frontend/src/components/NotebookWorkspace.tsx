@@ -9,6 +9,8 @@ import MarkdownView from './MarkdownView';
 import EquationDictation from './EquationDictation';
 import { useReader, useDictation, applyVoiceCommands, SPEECH_LANGS } from '../lib/useVoice';
 import { splitSentences, type SpeechSegment } from '../lib/speechUtils';
+import { caretAtPoint, domTokenIndex, sliceFromToken, wordStart } from '../lib/clickSpeak';
+import type { OcrWord } from '../lib/ocr';
 import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../lib/aiClient';
 
 // IMPORT SIMULATION & EXPERIMENT COMPONENTS
@@ -115,6 +117,16 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
 
   // --- VOICE STUDIO ---
   const reader = useReader();
+  const inputModeRef = useRef<'pen' | 'keyboard' | 'read' | 'shapes'>('read');
+  inputModeRef.current = inputMode;
+  const [clickSpeak, setClickSpeak] = useState(() => { try { return localStorage.getItem('nm_click_speak') !== '0'; } catch { return true; } });
+  useEffect(() => { try { localStorage.setItem('nm_click_speak', clickSpeak ? '1' : '0'); } catch { /* ignore */ } }, [clickSpeak]);
+  const clickSpeakRef = useRef(clickSpeak); clickSpeakRef.current = clickSpeak;
+  const [ocrWords, setOcrWords] = useState<{ [page: number]: OcrWord[] }>(() => { try { return JSON.parse(localStorage.getItem(`notesmaker_ocr_${notebookData?.title || 'default'}`) || '{}'); } catch { return {}; } });
+  useEffect(() => { try { localStorage.setItem(`notesmaker_ocr_${notebookData?.title || 'default'}`, JSON.stringify(ocrWords)); } catch { /* ignore */ } }, [ocrWords]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrMsg, setOcrMsg] = useState('');
+  const interimRng = useRef<{ start: number; end: number } | null>(null);
   const notesRef = useRef<HTMLTextAreaElement | null>(null);
   const caretRef = useRef<number | null>(null);
   const textRef = useRef(pageTypedText);
@@ -400,9 +412,25 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   };
   const dict = useDictation(text => {
     // While dictating, an utterance that starts with a wake word ("computer, open the Kalman filter") is a command, not note text.
+    const rng = interimRng.current; interimRng.current = null;
+    if (rng) { // remove the live (interim) preview that was streamed into the editor
+      const page = pageRef.current, cur = textRef.current[page] || '';
+      setNotesFor(page, cur.slice(0, rng.start) + cur.slice(rng.end)); caretRef.current = rng.start;
+    }
     if (looksLikeCommand(text)) { void import('../lib/agentRuntime').then(m => m.runCommand(text)); return; }
     insertAtCaret('', before => applyVoiceCommands(text, before.slice(-1)));
   });
+  // Stream the words being recognised straight into the editor as they are spoken (replaced by the formatted final text).
+  useEffect(() => {
+    const live = dict.interim.trim();
+    if (dict.state !== 'listening' && dict.state !== 'starting') return;
+    const page = pageRef.current, cur = textRef.current[page] || '', rng = interimRng.current;
+    if (!live) { if (rng) { setNotesFor(page, cur.slice(0, rng.start) + cur.slice(rng.end)); caretRef.current = rng.start; interimRng.current = null; } return; }
+    const start = rng ? rng.start : Math.min(caretRef.current ?? cur.length, cur.length), base = rng ? cur.slice(0, rng.start) + cur.slice(rng.end) : cur;
+    const prev = base.slice(Math.max(0, start - 1), start), text = (prev && !/\s/.test(prev) ? ' ' : '') + live;
+    setNotesFor(page, base.slice(0, start) + text + base.slice(start)); interimRng.current = { start, end: start + text.length }; caretRef.current = start + text.length;
+    if (inputModeRef.current !== 'keyboard') setInputMode('keyboard');
+  }, [dict.interim]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const stop = () => dict.stop(); window.addEventListener('nm:stop-dictation', stop); return () => window.removeEventListener('nm:stop-dictation', stop); }, [dict]);
   const startDictation = () => {
     setInputMode('keyboard');
@@ -417,12 +445,63 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const noteLines = (pageTypedText[currentPage] || '').split('\n').map((line, li) => sentsOf(`n${li}`, line));
   const allSegs: SpeechSegment[] = [{ id: 't-0', text: activeTitle }, ...headingS, ...contentS, ...noteLines.flat()];
   const playPage = () => reader.playFrom(allSegs, 0);
-  const speakFrom = (id: string) => {
+  /** Read from segment `id`; when (node, offset) is given, start at exactly that word of the segment. */
+  const speakFrom = (id: string, root?: HTMLElement | null, node?: Node | null, offset = 0) => {
+    if (!clickSpeakRef.current) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && sel.toString().trim()) return; // the student is selecting text, not clicking
     const i = allSegs.findIndex(x => x.id === id);
-    if (i >= 0) reader.playFrom(allSegs, i);
+    if (i < 0) return;
+    const segs = allSegs.slice();
+    if (root && node) { const k = domTokenIndex(root, node, offset); if (k > 0) segs[i] = { ...segs[i], text: sliceFromToken(segs[i].text, k) }; }
+    reader.playFrom(segs, i);
   };
+  const speakAtPoint = (id: string, el: HTMLElement, x: number, y: number) => { const c = caretAtPoint(x, y); speakFrom(id, el, c && el.contains(c.node) ? c.node : null, c?.offset ?? 0); };
+  /** Highlighting text with the mouse/finger starts reading from the first highlighted word. */
+  const speakFromSelection = () => {
+    if (!clickSpeakRef.current) return;
+    const sel = window.getSelection(); if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+    const r = sel.getRangeAt(0), startEl = (r.startContainer.nodeType === 1 ? r.startContainer as HTMLElement : r.startContainer.parentElement)?.closest('[data-seg]') as HTMLElement | null;
+    if (!startEl) return;
+    const id = startEl.getAttribute('data-seg')!, i = allSegs.findIndex(x => x.id === id); if (i < 0) return;
+    const k = domTokenIndex(startEl, r.startContainer, r.startOffset), segs = allSegs.slice();
+    if (k > 0) segs[i] = { ...segs[i], text: sliceFromToken(segs[i].text, k) };
+    reader.playFrom(segs, i);
+  };
+  /** Click (or highlight) inside the typing box: read from the clicked word onwards. */
+  const speakFromTextarea = (ta: HTMLTextAreaElement) => {
+    if (!clickSpeakRef.current || ta.selectionStart == null) return;
+    const v = ta.value; if (!v.trim()) return;
+    const from = wordStart(v, ta.selectionStart), segs: SpeechSegment[] = []; let n = 0;
+    for (const line of v.slice(from).split('\n')) for (const t of splitSentences(line)) segs.push({ id: `ta-${n++}`, text: t });
+    if (segs.length) reader.playFrom(segs, 0);
+  };
+  // ---- handwriting (pen) -> text, fully offline ----
+  const hwLines = (page: number): { id: string; text: string; words: number[] }[] => {
+    const ws = ocrWords[page] || [], out: { id: string; text: string; words: number[] }[] = [];
+    ws.forEach((w, i) => { let l = out.find(o => o.id === `hw-${w.line}`); if (!l) { l = { id: `hw-${w.line}`, text: '', words: [] }; out.push(l); } l.text += (l.text ? ' ' : '') + w.text; l.words.push(i); });
+    return out;
+  };
+  const runOcr = async () => {
+    const cv = canvasRef.current; if (!cv) { setOcrMsg('Open the Pen tab first so the page ink is available.'); return; }
+    setOcrBusy(true); setOcrMsg('Reading your handwriting… (first run loads the offline engine)');
+    try {
+      const { recognize } = await import('../lib/ocr'); const r = await recognize(cv);
+      setOcrWords(prev => ({ ...prev, [currentPage]: r.words }));
+      setOcrMsg(r.words.length ? `Recognised ${r.words.length} words in ${r.lines.length} lines. Switch to Read mode and click any handwritten word to hear from there.` : 'No writing recognised. Write larger, darker and in print-style letters, then try again.');
+    } catch (e) { setOcrMsg(`Handwriting recognition could not start: ${(e as Error).message}`); }
+    finally { setOcrBusy(false); }
+  };
+  const speakHandwritingFrom = (wordIdx: number) => {
+    if (!clickSpeakRef.current) return;
+    const lines = hwLines(currentPage), li = lines.findIndex(l => l.words.includes(wordIdx)); if (li < 0) return;
+    const segs: SpeechSegment[] = lines.map(l => ({ id: l.id, text: l.text })), k = lines[li].words.indexOf(wordIdx);
+    if (k > 0) segs[li] = { ...segs[li], text: lines[li].words.slice(k).map(i => (ocrWords[currentPage] || [])[i].text).join(' ') };
+    reader.playFrom(segs, li);
+  };
+  const readHandwriting = () => { const lines = hwLines(currentPage); if (!lines.length) { setOcrMsg('Nothing recognised yet — press “Recognise handwriting” first.'); return; } reader.playFrom(lines.map(l => ({ id: l.id, text: l.text })), 0); };
+  const handwritingToText = () => { const lines = hwLines(currentPage); if (!lines.length) { setOcrMsg('Nothing recognised yet — press “Recognise handwriting” first.'); return; } insertAtCaret('', before => `${before && !before.endsWith('\n') ? '\n' : ''}${lines.map(l => l.text).join('\n')}\n`); setOcrMsg('Handwriting added to your typed notes — you can edit it.'); };
+
   const readSelection = () => {
     const t = window.getSelection()?.toString().trim() || (notesRef.current ? notesRef.current.value.slice(notesRef.current.selectionStart, notesRef.current.selectionEnd).trim() : '');
     if (!t) { reader.playFrom(allSegs, 0); return; }
@@ -466,8 +545,8 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       data-seg={x.id}
       role="button"
       tabIndex={0}
-      title="Click to hear from here"
-      onClick={() => speakFrom(x.id)}
+      title="Click any word to hear from there"
+      onClick={e => speakAtPoint(x.id, e.currentTarget, e.clientX, e.clientY)}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); speakFrom(x.id); } }}
       className={`cursor-pointer rounded px-0.5 transition-colors hover:bg-amber-200/70 ${reader.segId === x.id ? 'bg-yellow-300 text-slate-900' : ''}`}
     ><RichText text={x.text} />{' '}</span>
@@ -503,6 +582,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   };
 
   const clearDrawing = () => {
+    setOcrWords(prev => ({ ...prev, [currentPage]: [] }));
     const c = canvasRef.current;
     if (c && ctxRef.current) { ctxRef.current.clearRect(0, 0, c.width, c.height); }
     setPageDrawings(prev => ({ ...prev, [currentPage]: '' }));
@@ -633,6 +713,15 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
               <span className="text-[10px] text-slate-500 font-medium">Line width</span>
             </div>
             <button onClick={clearDrawing} className="px-3 py-1.5 rounded bg-red-50 text-red-600 border border-red-200 font-semibold flex items-center gap-1"><Trash2 className="w-4 h-4"/> Clear drawings</button>
+            <div className="flex flex-col gap-1 border-l border-slate-200 pl-3 max-w-[300px]">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Handwriting (offline OCR)</span>
+              <div className="flex gap-1 flex-wrap">
+                <button data-testid="ocr-run" onClick={() => void runOcr()} disabled={ocrBusy} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold disabled:opacity-50">{ocrBusy ? 'Reading…' : 'Recognise handwriting'}</button>
+                <button onClick={readHandwriting} className="px-2 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Volume2 className="w-3.5 h-3.5"/> Read it</button>
+                <button onClick={handwritingToText} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">To typed text</button>
+              </div>
+              {ocrMsg && <span data-testid="ocr-msg" className="text-[11px] text-slate-600">{ocrMsg}</span>}
+            </div>
           </div>
         )}
 
@@ -675,6 +764,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                     <button onClick={readSelection} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">Selection</button>
                     <button onClick={readParagraph} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">Paragraph</button>
                     <button onClick={readSection} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">Section</button>
+                    <label className="flex items-center gap-1 px-2 py-1.5 rounded bg-amber-50 border border-amber-300 font-semibold cursor-pointer" title="When on, clicking or highlighting any word (typed, dictated or handwritten) reads aloud from that point"><input type="checkbox" data-testid="click-speak-toggle" checked={clickSpeak} onChange={e => setClickSpeak(e.target.checked)} /> Click-to-speak</label>
                     <span className="w-px h-6 bg-slate-300 mx-1" />
                     <button onClick={reader.prev} disabled={reader.state === 'idle'} aria-label="Previous sentence" className="p-1.5 rounded bg-slate-100 border disabled:opacity-40"><SkipBack className="w-3.5 h-3.5"/></button>
                     {reader.state === 'playing'
@@ -790,7 +880,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
           </div>
         ) : (
           /* Normal Notebook Page View */
-          <div className={`select-text w-full max-w-[850px] min-h-[1100px] shadow-2xl rounded-sm border border-amber-200/80 relative overflow-hidden transition-colors ${getPaperBackground()}`}>
+          <div onMouseUp={speakFromSelection} className={`select-text w-full max-w-[850px] min-h-[1100px] shadow-2xl rounded-sm border border-amber-200/80 relative overflow-hidden transition-colors ${getPaperBackground()}`}>
             <div className="absolute left-6 md:left-16 top-0 bottom-0 w-[1px] bg-red-300/60 pointer-events-none z-0"></div>
 
             <div className="p-6 pl-10 md:p-16 relative z-0 space-y-6 text-slate-900">
@@ -821,9 +911,10 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                     <textarea
                       ref={notesRef}
                       value={pageTypedText[currentPage] || ''}
-                      onChange={(e) => { caretRef.current = e.target.selectionStart; setNotesFor(currentPage, e.target.value); }}
+                      onChange={(e) => { caretRef.current = e.target.selectionStart; interimRng.current = null; if (reader.state !== 'idle') reader.stop(); setNotesFor(currentPage, e.target.value); }}
                       onSelect={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
-                      onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+                      onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; if (dict.state === 'idle' && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) speakFromTextarea(e.currentTarget); }}
+                      onMouseUp={(e) => { if (dict.state === 'idle' && e.currentTarget.selectionStart !== e.currentTarget.selectionEnd) speakFromTextarea(e.currentTarget); }}
                       onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
                       placeholder="Type notes here, or use the Voice tab to dictate. Math: $x^2$"
                       className="w-full text-slate-900 text-base font-sans p-3 bg-amber-50/30 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-y leading-relaxed min-h-[140px]"
@@ -997,9 +1088,23 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
               className="absolute inset-0 cursor-crosshair z-20" 
               style={{ pointerEvents: inputMode === 'pen' ? 'auto' : 'none' }} 
             />
+            {inputMode === 'read' && (ocrWords[currentPage] || []).map((w, i) => (
+              <button key={i} type="button" title={`Handwriting: “${w.text}” — click to hear from here`} data-testid="ocr-word" onClick={() => speakHandwritingFrom(i)}
+                className={`absolute z-30 rounded-sm border border-dashed border-blue-400/50 hover:bg-amber-300/40 ${reader.segId === `hw-${w.line}` ? 'bg-yellow-300/50' : ''}`}
+                style={{ left: `${(w.x0 / 850) * 100}%`, top: `${(w.y0 / 1100) * 100}%`, width: `${((w.x1 - w.x0) / 850) * 100}%`, height: `${((w.y1 - w.y0) / 1100) * 100}%` }} />
+            ))}
           </div>
         )}
       </div>
+
+      {reader.state !== 'idle' && (
+        <div data-testid="reader-bar" className="no-print fixed left-1/2 -translate-x-1/2 bottom-14 z-[55] flex items-center gap-2 px-3 py-2 rounded-full bg-slate-900 text-white shadow-xl text-xs max-w-[95vw]">
+          <Volume2 className="w-4 h-4 text-amber-400 shrink-0" />
+          <span className="hidden sm:inline truncate max-w-[16rem]">Reading… click any word to jump there</span>
+          {reader.state === 'playing' ? <button onClick={reader.pause} aria-label="Pause reading" className="p-1 rounded hover:bg-slate-700"><Pause className="w-4 h-4"/></button> : <button onClick={reader.resume} aria-label="Resume reading" className="p-1 rounded hover:bg-slate-700"><Play className="w-4 h-4"/></button>}
+          <button onClick={reader.stop} aria-label="Stop reading" className="p-1 rounded bg-red-600 hover:bg-red-500"><StopSquare className="w-4 h-4"/></button>
+        </div>
+      )}
 
       {/* 5. FOOTER */}
       <div className="no-print h-10 bg-white border-t border-slate-300 px-3 md:px-8 flex items-center justify-between text-xs text-slate-700 z-30">

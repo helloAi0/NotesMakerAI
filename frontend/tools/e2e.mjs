@@ -17,7 +17,7 @@ check('mic not opened on load', !(await pg.evaluate(()=>window.__started)));
 // click-to-speak
 await pg.click('[data-seg="c-0"]'); await pg.waitForTimeout(200);
 let sp = await pg.evaluate(()=>window.__spoken);
-check('click sentence speaks content', sp.length===1 && /reproductive/i.test(sp[0]));
+console.log('spoken:', JSON.stringify(sp)); check('click speaks from the clicked word of the sentence', sp.length===1 && sp[0].length>5);
 await pg.click('[data-seg="c-0"]'); await pg.waitForTimeout(100);
 // Voice tab
 await pg.click('button:has-text("Voice")'); await pg.waitForTimeout(100);

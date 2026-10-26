@@ -11,11 +11,16 @@
     "smoke": "tsx tools/smoke.mts",
     "fuzz": "tsx tools/fuzz.mts",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "test:e2e": "node tools/e2e.mjs && node tools/e2e_sims.mjs && node tools/e2e_mic.mjs && node tools/e2e_mobile.mjs && node tools/e2e_agent.mjs",
-    "check": "npm run typecheck && npm run fuzz && npm run build"
+    "test:e2e": "node tools/e2e.mjs && node tools/e2e_sims.mjs && node tools/e2e_mic.mjs && node tools/e2e_mobile.mjs && node tools/e2e_agent.mjs && node tools/e2e_speak.mjs",
+    "check": "npm run typecheck && npm run fuzz && npm run build",
+    "ocr:assets": "node tools/copy-ocr.mjs",
+    "predev": "node tools/copy-ocr.mjs",
+    "prebuild": "node tools/copy-ocr.mjs",
+    "postinstall": "node tools/copy-ocr.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",
+    "@tesseract.js-data/eng": "^1.0.0",
     "katex": "^0.19.0",
     "lucide-react": "^1.59.0",
     "pdfjs-dist": "^6.4.299",
@@ -24,7 +29,8 @@
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0"
+    "remark-math": "^6.0.0",
+    "tesseract.js": "^7.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
