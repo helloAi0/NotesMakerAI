@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   FileText, UploadCloud, Search, BookOpen, CheckCircle2, Clock, Sparkles, Send,
-  Trash2, Key, Check, X, AlertTriangle, RefreshCw, Settings2,
+  Trash2, Key, Check, X, AlertTriangle, RefreshCw, Settings2, FolderPlus, Folder, FolderOpen,
 } from 'lucide-react';
-import * as pdfjsLib from 'pdfjs-dist';
+import { addFolder, extractPdf, listDocs, listFolders, moveDoc, removeDoc, removeFolder, saveDoc } from '../lib/libraryStore';
+import { Bm25, keyTerms, summarize } from '../lib/textTools';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -15,7 +16,6 @@ import {
 } from '../lib/aiClient';
 import type { AiConfig, ProviderId, Speed } from '../lib/aiClient';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -30,6 +30,7 @@ interface DocumentItem {
   textContent: string;
   pageTexts: string[];
   uploadDate: string;
+  folder?: string;
   errorMsg?: string;
 }
 
@@ -202,6 +203,22 @@ function throttled(fn: (t: string) => void, ms = 120) {
   };
 }
 
+/** Works with no API key: finds the best pages (BM25) and quotes the most relevant sentences with page numbers. */
+function offlineAnswer(pages: string[], q: string): string {
+  const idx = new Bm25(pages.map((t, i) => ({ id: String(i), text: t })));
+  const hits = idx.search(q, 3);
+  if (!hits.length) return `I could not find anything about **“${q}”** in this document. Try different keywords (the words used in the PDF).`;
+  const lines: string[] = [];
+  for (const h of hits) { const best = summarize(h.doc.text, 2, q); if (best.length) lines.push(`- ${best.join(' ')} *(page ${Number(h.doc.id) + 1})*`); }
+  return `Here is what the document says about **${q}** (offline search; no AI key needed):\n\n${lines.join('\n')}\n\n*For a written explanation in your own words, add an AI key (top right).*`;
+}
+function offlineSummary(doc: DocumentItem): string {
+  const n = doc.pageTexts.length, parts = Math.min(6, Math.max(1, Math.ceil(n / 8))), per = Math.ceil(n / parts), out: string[] = [];
+  out.push(`# Summary of ${doc.name}\n*Offline extractive summary: the most central sentences of the document, in order. Add an AI key for an abstractive summary.*\n`);
+  out.push(`**Key terms:** ${keyTerms(doc.textContent, 10).join(', ')}\n`);
+  for (let i = 0; i < parts; i++) { const from = i * per, to = Math.min(n, from + per), t = doc.pageTexts.slice(from, to).join(' '); const ss = summarize(t, 4); if (ss.length) out.push(`## Pages ${from + 1}–${to}\n${ss.map(x => `- ${x}`).join('\n')}`); }
+  return out.join('\n\n');
+}
 const STOPWORDS = new Set(['the', 'and', 'for', 'are', 'was', 'what', 'which', 'who', 'how', 'why', 'when', 'where', 'does', 'did', 'this', 'that', 'with', 'from', 'about', 'into', 'have', 'has', 'can', 'you', 'your', 'tell', 'explain', 'give']);
 
 /** Whole document if it fits, otherwise the pages that best match the question. */
@@ -602,6 +619,25 @@ export default function PdfSourceLibrary() {
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [evals, setEvals] = useState<Record<number, EvalState>>({});
 
+  const [folders, setFolders] = useState<string[]>(() => listFolders());
+  const [folderFilter, setFolderFilter] = useState<string>('__all');
+  const [libMsg, setLibMsg] = useState('');
+  const loaded = useRef(false);
+  const reloadLib = async () => {
+    const stored = await listDocs();
+    setFolders(listFolders());
+    setDocuments(prev => { const live = prev.filter(d => d.status !== 'Ready'); return [...live, ...stored.map(d => ({ ...d, status: 'Ready' as const, uploadDate: new Date(d.uploadDate).toLocaleDateString() }))]; });
+    if (!loaded.current) { loaded.current = true; }
+  };
+  useEffect(() => { void reloadLib(); const h = () => { void reloadLib(); }; window.addEventListener('nm:library', h); return () => window.removeEventListener('nm:library', h); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!selectedDocId && documents.length) { const first = documents.find(d => d.status === 'Ready'); if (first) setSelectedDocId(first.id); } }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const open = (e: Event) => { const id = (e as CustomEvent<{ id: string }>).detail?.id; if (id) { setSelectedDocId(id); setFolderFilter('__all'); } };
+    const pick = (e: Event) => { const el = document.querySelector<HTMLInputElement>((e as CustomEvent<{ folder: boolean }>).detail?.folder ? '[data-testid="pdf-folder-input"]' : '[data-testid="pdf-input"]'); try { el?.click(); } catch { /* needs a user click */ } };
+    window.addEventListener('nm:open-pdf', open); window.addEventListener('nm:pick-files', pick);
+    return () => { window.removeEventListener('nm:open-pdf', open); window.removeEventListener('nm:pick-files', pick); };
+  }, []);
+  const visibleDocs = documents.filter(d => folderFilter === '__all' || (folderFilter === '__none' ? !d.folder : d.folder === folderFilter));
   const selectedDoc = documents.find(d => d.id === selectedDocId);
   const lim = docLimits(cfg);
   const docResults: DocResults = (selectedDocId && results[selectedDocId]) || {};
@@ -658,52 +694,39 @@ export default function PdfSourceLibrary() {
 
   /* ---------------- Upload ---------------- */
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = ''; // allows uploading the same file again later
-    if (!file) return;
-
-    const newDocId = `doc-${Date.now()}`;
-    setDocuments(prev => [{
-      id: newDocId,
-      name: file.name,
-      size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`,
-      pages: 0,
-      status: 'Extracting',
-      textContent: '',
-      pageTexts: [],
-      uploadDate: 'Just now',
-    }, ...prev]);
-    setSelectedDocId(newDocId);
-    setRagAnswer(null);
-    setTabError(null);
-
+  const ingestFile = async (file: File, folder: string) => {
+    const newDocId = `doc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setDocuments(prev => [{ id: newDocId, name: file.name, size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`, pages: 0, status: 'Extracting', textContent: '', pageTexts: [], uploadDate: 'Just now', folder }, ...prev]);
+    setSelectedDocId(newDocId); setRagAnswer(null); setTabError(null);
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const pageTexts: string[] = [];
-
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        pageTexts.push(content.items.map((item: any) => item.str ?? '').join(' '));
-      }
-
-      const totalChars = pageTexts.reduce((n, p) => n + p.trim().length, 0);
-      if (totalChars < 200) {
-        throw new Error('No selectable text found. This looks like a scanned PDF (images of pages). Run OCR on it first, then upload again.');
-      }
-
+      const { pages, pageTexts } = await extractPdf(file);
       const fullText = pageTexts.map((p, i) => pageBlock(p, i)).join('');
-      setDocuments(prev => prev.map(d => d.id === newDocId
-        ? { ...d, status: 'Ready', pages: pdf.numPages, textContent: fullText, pageTexts }
-        : d));
+      const stored = { id: newDocId, name: file.name, size: `${(file.size / (1024 * 1024)).toFixed(1)} MB`, pages, textContent: fullText, pageTexts, uploadDate: new Date().toISOString(), folder };
+      await saveDoc(stored);
+      setDocuments(prev => prev.map(d => (d.id === newDocId ? { ...d, status: 'Ready', pages, textContent: fullText, pageTexts, uploadDate: new Date().toLocaleDateString() } : d)));
     } catch (error: any) {
       console.error('PDF Error:', error);
-      setDocuments(prev => prev.map(d => d.id === newDocId
-        ? { ...d, status: 'Error', errorMsg: error?.message || 'Could not read this PDF.' }
-        : d));
+      setDocuments(prev => prev.map(d => d.id === newDocId ? { ...d, status: 'Error', errorMsg: error?.message || 'Could not read this PDF.' } : d));
     }
+  };
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).filter(f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    const all = e.target.files?.length ?? 0;
+    e.target.value = ''; // allows uploading the same file again later
+    if (!files.length) { if (all) setLibMsg('No PDF files found in that selection.'); return; }
+    const folder = folderFilter.startsWith('__') ? '' : folderFilter;
+    setLibMsg(files.length > 1 ? `Importing ${files.length} PDFs…` : '');
+    for (const f of files) await ingestFile(f, folder);
+    setLibMsg(files.length > 1 ? `Imported ${files.length} PDFs${folder ? ` into “${folder}”` : ''}.` : '');
+  };
+  /** Importing a whole folder: every PDF inside becomes a document; the folder name becomes a library folder. */
+  const handleFolderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).filter(f => /\.pdf$/i.test(f.name)); e.target.value = '';
+    if (!files.length) { setLibMsg('That folder has no PDF files.'); return; }
+    const rel = (files[0] as File & { webkitRelativePath?: string }).webkitRelativePath || ''; const name = addFolder(rel.split('/')[0] || 'Imported');
+    setFolders(listFolders()); setFolderFilter(name); setLibMsg(`Importing ${files.length} PDFs into “${name}”…`);
+    for (const f of files) await ingestFile(f, name);
+    setLibMsg(`Imported ${files.length} PDFs into “${name}”.`);
   };
 
   /* ---------------- Ask FRIDAY ---------------- */
@@ -711,7 +734,7 @@ export default function PdfSourceLibrary() {
   const handleRagSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ragQuery.trim() || !selectedDoc || selectedDoc.status !== 'Ready') return;
-    if (!cfg.apiKey.trim()) { setRagAnswer('Add and verify your API key (top right) first.'); setShowKeyInput(true); return; }
+    if (!cfg.apiKey.trim()) { setRagAnswer(offlineAnswer(selectedDoc.pageTexts, ragQuery)); return; }
 
     setIsSearching(true);
     setRagAnswer('');
@@ -879,7 +902,8 @@ export default function PdfSourceLibrary() {
     const doc = selectedDoc;
     if (!doc || doc.status !== 'Ready') return;
     if (!cfg.apiKey.trim()) {
-      setTabError({ tab, message: 'Add and verify your API key (top right) first.' });
+      if (tab === 'summary') { patchResults(doc.id, { summary: offlineSummary(doc) }); return; }
+      setTabError({ tab, message: tab === 'formulas' ? 'Formula extraction and quizzes need an AI key (top right). Summaries and questions about the document work offline without one.' : 'Quiz generation needs an AI key (top right). Summaries and questions about the document work offline without one.' });
       setShowKeyInput(true);
       return;
     }
@@ -942,6 +966,7 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
 
   const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    void removeDoc(id);
     const remaining = documents.filter(d => d.id !== id);
     setDocuments(remaining);
     setResults(prev => { const { [id]: _removed, ...rest } = prev; return rest; });
@@ -1078,21 +1103,34 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
 
           <label className="cursor-pointer bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm transition-all">
             <UploadCloud className="w-4 h-4" /> Upload Document
-            <input type="file" accept=".pdf" onChange={handleFileUpload} className="hidden" />
+            <input data-testid="pdf-input" type="file" accept=".pdf,application/pdf" multiple onChange={handleFileUpload} className="hidden" />
+          </label>
+          <label className="cursor-pointer bg-white hover:bg-amber-50 border border-amber-300 text-amber-800 px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 shadow-sm transition-all" title="Import every PDF in a folder from your computer">
+            <FolderPlus className="w-4 h-4" /> Import folder
+            <input data-testid="pdf-folder-input" type="file" multiple onChange={handleFolderUpload} className="hidden" {...({ webkitdirectory: '', directory: '' } as Record<string, string>)} />
           </label>
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden p-6 gap-6">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden p-3 md:p-6 gap-3 md:gap-6">
 
         {/* Left Column: Document List */}
-        <div className="w-80 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
+        <div className="w-full md:w-80 max-h-[40vh] md:max-h-none bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
           <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
             <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Your Library</span>
-            <span className="text-xs font-semibold text-slate-500">{documents.length} Files</span>
+            <span className="text-xs font-semibold text-slate-500">{visibleDocs.length} Files</span>
           </div>
+          <div className="px-3 pt-2 flex gap-1 flex-wrap border-b border-slate-100 pb-2" data-testid="folder-bar">
+            {[['__all', 'All'], ['__none', 'Unfiled'], ...folders.map(f => [f, f])].map(([k, label]) => (
+              <button key={k} onClick={() => setFolderFilter(k)} className={`px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 ${folderFilter === k ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{k.startsWith('__') ? null : folderFilter === k ? <FolderOpen className="w-3 h-3" /> : <Folder className="w-3 h-3" />}{label}</button>
+            ))}
+            <button data-testid="new-folder" onClick={() => { const n = window.prompt('New folder name'); if (n) { const f = addFolder(n); setFolders(listFolders()); setFolderFilter(f); } }} className="px-2 py-1 rounded-lg text-[11px] font-semibold bg-white border border-dashed border-slate-300 text-slate-600 hover:bg-amber-50 flex items-center gap-1"><FolderPlus className="w-3 h-3" /> New</button>
+            {!folderFilter.startsWith('__') && <button onClick={() => { if (window.confirm(`Delete folder “${folderFilter}”? Its files stay in the library (unfiled).`)) { void removeFolder(folderFilter); setFolderFilter('__all'); } }} className="px-2 py-1 rounded-lg text-[11px] text-red-600 hover:bg-red-50" aria-label="Delete this folder"><Trash2 className="w-3 h-3" /></button>}
+          </div>
+          {libMsg && <p data-testid="lib-msg" className="px-3 py-1.5 text-[11px] text-amber-800 bg-amber-50 border-b border-amber-100">{libMsg}</p>}
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {documents.map((doc) => (
+            {visibleDocs.length === 0 && <p className="text-xs text-slate-500 p-3 text-center">{documents.length ? 'No files in this folder yet.' : 'Your library is empty. Upload a PDF (or a whole folder of PDFs): it is saved on this device and works offline.'}</p>}
+            {visibleDocs.map((doc) => (
               <div
                 key={doc.id}
                 onClick={() => selectDoc(doc.id)}
@@ -1104,7 +1142,8 @@ Return ONLY JSON: {"score": <number from 0 to ${q.marks}, halves allowed>, "feed
                   <FileText className={`w-5 h-5 shrink-0 mt-0.5 ${doc.id === selectedDocId ? 'text-amber-600' : 'text-slate-400'}`} />
                   <div className="flex-1 min-w-0 pr-6">
                     <p className="text-xs font-bold text-slate-800 truncate">{doc.name}</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">{doc.pages} pages • {doc.size}</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">{doc.pages} pages • {doc.size}{doc.folder ? ` • 📁 ${doc.folder}` : ''}</p>
+                    {doc.status === 'Ready' && folders.length > 0 && <select aria-label={`Move ${doc.name} to folder`} value={doc.folder || ''} onClick={e => e.stopPropagation()} onChange={e => { void moveDoc(doc.id, e.target.value); setDocuments(prev => prev.map(x => (x.id === doc.id ? { ...x, folder: e.target.value } : x))); }} className="mt-1 text-[10px] border border-slate-200 rounded px-1 py-0.5 bg-white text-slate-600 max-w-full"><option value="">Unfiled</option>{folders.map(f => <option key={f} value={f}>{f}</option>)}</select>}
                     <div className="mt-2 flex items-center justify-between">
                       {doc.status === 'Ready' ? (
                         <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Extracted</span>

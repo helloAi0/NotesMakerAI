@@ -1,3 +1,4 @@
+import { touch } from '../lib/activity';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Pause, Play, RotateCcw, StepForward, Camera, Download,
@@ -174,6 +175,7 @@ export default function SimPlayer({ sim, onBack, initialValues, notebookContext 
   // Let the voice agent / help-bot drive this simulation (set sliders, run, press buttons ...).
   const liveRef = useRef({ playing, vals });
   liveRef.current = { playing, vals };
+  useEffect(() => { touch('sim', sim.id); }, [sim.id]);
   useEffect(() => register('sim', {
     sim,
     values: () => valsRef.current,

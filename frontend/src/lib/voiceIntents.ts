@@ -24,6 +24,11 @@ export type Intent =
   | { kind: 'explain'; q: string }
   | { kind: 'search'; q: string }
   | { kind: 'help' }
+  | { kind: 'list_pdfs' } | { kind: 'summarize_pdf'; q: string } | { kind: 'open_pdf'; q: string }
+  | { kind: 'make_folder'; name: string } | { kind: 'move_pdf'; q: string; folder: string } | { kind: 'import_pdfs'; folder: boolean }
+  | { kind: 'gen_note'; topic: string } | { kind: 'summarize_page' }
+  | { kind: 'add_task'; text: string; exam: boolean } | { kind: 'whats_due'; range: 'today' | 'tomorrow' | 'week' | 'all' } | { kind: 'complete_task'; q: string }
+  | { kind: 'open_settings' } | { kind: 'insert_last' }
   | { kind: 'unknown'; raw: string };
 export interface Step { raw: string; intent: Intent }
 
@@ -70,7 +75,7 @@ export function parseNumber(s: string): number | null {
 }
 
 /* ---------- chain splitting ---------- */
-const FILLER = /^(?:(?:hey|ok|okay)\s+)?(?:notes|computer|assistant|jarvis)[,:]?\s+|^(?:please|kindly|now|then|and|so|just|can you|could you|would you|i want to|i would like to|i d like to|lets|let us)\s+/i;
+const FILLER = /^(?:(?:hey|ok|okay)\s+)?(?:notes|computer|assistant|jarvis|friday)[,:]?\s+|^(?:tell|ask) (?:friday|jarvis|the assistant) to\s+|^(?:please|kindly|now|then|and|so|just|can you|could you|would you|i want to|i would like to|i d like to|lets|let us)\s+/i;
 export function splitChain(text: string): string[] {
   let t = text.replace(/[→⇒➔➜]/g, ' | ').replace(/-{1,2}>|=>/g, ' | ').replace(/\s>\s/g, ' | ');
   t = t.replace(/\s+(?:and then|then|after that|afterwards|next|finally|followed by)\s+/gi, ' | ');
@@ -84,7 +89,8 @@ const VIEWS: [ViewId, RegExp][] = [
   ['simulations', /^(visuals? studio|visuals?|simulation(s)?( library| lab| studio| home)?|sim(s)? library|studio)$/],
   ['library', /^(pdf( and| &)? (source )?library|source library|pdf library|library|pdfs?)$/],
   ['dashboard', /^(dashboard|home( page)?|main( menu| page)?)$/],
-  ['planner', /^(study )?planner$/],
+  ['friday', /^(friday|friday chat|chat( with friday)?|ai assistant|study assistant|assistant( chat)?|chat ?bot)$/],
+  ['planner', /^(study )?(planner|plan|schedule|tasks|to ?do( list)?)$/],
   ['generator', /^(ai )?(note )?generator|ai note generator$/],
 ];
 export function viewFromName(name: string): ViewId | null {
@@ -105,6 +111,24 @@ export function parseStep(raw: string): Intent {
   if (/^(previous|prior|last|back) page$/.test(n)) return { kind: 'goto_page', delta: -1 };
   if (/^(stop|quit|pause|cancel|end)( the)? (reading|speaking|talking|narration|voice)$|^(be quiet|silence|shut up)$/.test(n)) return { kind: 'stop_reading' };
   if (/^(read|speak|narrate)( this| the| my| out)?( page| notes| note| aloud| out loud)?( aloud| out loud)?$/.test(n) || /^read (it )?(aloud|out loud)$/.test(n)) return { kind: 'read_aloud' };
+
+  // ---- FRIDAY agent: settings, PDFs / folders, notes, planner (must run before the generic explain/open/write rules)
+  if (/^(add|put|save|insert|write|paste)( the| this| that| it)?( summary| notes?| answer| text| output)( of it| of that)? (to|into|in|on) (my |the )?(notebook|note book|notes|page)$/.test(n)) return { kind: 'insert_last' };
+  if (/^(open|show|go to|change|edit)( the| my)? (settings|preferences|ai settings|api keys?|ai keys?|voice settings)$/.test(n)) return { kind: 'open_settings' };
+  if (/^(summari[sz]e|summary of|tldr|sum up|recap)( this| the| my| current)? (page|note|notes|notebook)$/.test(n)) return { kind: 'summarize_page' };
+  if ((m = n.match(/^(?:summari[sz]e|summary of|sum up|recap|take (?:out )?(?:the )?summary (?:out )?(?:of|from)|get (?:the )?summary (?:of|from)|give me (?:the )?summary (?:of|from)|extract (?:the )?summary (?:of|from))\s+(?:my |the |this )?(?:pdf |document |file )?(.+?)(?:\s+(?:pdf|document|file))?$/)) && !/^(this|it|page|notes?|notebook|simulation|sim)$/.test(m[1])) return { kind: 'summarize_pdf', q: m[1] };
+  if (/^(?:take|get|give me|extract|make|do)(?: out)? (?:the |a )?summary(?: out)?(?: of (?:it|this|that|the pdf|the document|the file))?$/.test(n)) return { kind: 'summarize_pdf', q: '' };
+  if (/^(list|show|what are|what is in)( me)?( all)?( of)?( my| the)? (pdfs?|documents|files|pdf library|library|folders|pdf folders)( i have| in (my )?library)?$/.test(n)) return { kind: 'list_pdfs' };
+  if ((m = n.match(/^(?:create|make|add|new)\s+(?:a |an )?(?:new )?folder(?: called| named| with name| for)?\s+(.+)$/)) || (m = n.match(/^(?:create|make|add|new)\s+(.+?)\s+folder$/))) return { kind: 'make_folder', name: s.replace(/^.*?folder\s*(?:called|named|with name|for)?\s*/i, '').trim() || m[1] };
+  if (/^(import|upload|add|load|bring in|put|take|move)( in)?( my| some| a| the| this| that| whole)* ?(pdfs?|files?|documents?|folders?|pdf folders?)( from (my )?(computer|device|laptop|phone))?( (in|into|to|onto) (my |the )?(pdf( and source)?( section| library| folder)?|library|source library))?$/.test(n) && !/notebook/.test(n)) return { kind: 'import_pdfs', folder: /folder/.test(n.split(/ (in|into|to|onto) /)[0]) };
+  if ((m = n.match(/^(?:move|put|file|copy|transfer|store|add|shift)\s+(?:the |my |this )?(?:pdf |file |document )?(.+?)\s+(?:in ?to|to|under|in)\s+(?:the |my )?(?:pdf )?(?:folder |section )?(.+?)(?:\s+(?:folder|section))?$/)) && !/^(notebook|planner|note book|page \d+|visuals?|studio)/.test(m[2]) && !/notebook|planner|\bpage\b/.test(m[1])) return { kind: 'move_pdf', q: m[1].replace(/\b(pdf|file|document)s?\b/g, '').trim() || m[1], folder: m[2] };
+  if (/^(take|put|move|import|upload|add|bring|copy)\b.*\bfolders?\b.*\b(pdf|library|source)\b/.test(n) && !/notebook/.test(n)) return { kind: 'import_pdfs', folder: true };
+  if (!/^(?:open|read|show|view|display)\s+(?:the |my )?(?:pdf )?(?:and )?(?:source )?(?:library|folders?|pdfs?)$/.test(n) && ((m = n.match(/^(?:open|read|show|view|display)\s+(?:the |my )?pdf\s+(.+)$/)) || (m = n.match(/^(?:open|read|show|view|display)\s+(?:the |my )?(.+?)\s+(?:pdf|document)$/)))) return { kind: 'open_pdf', q: m[1] };
+  if ((m = n.match(/^(?:write|make|create|generate|draft|compose|prepare|take|build|give me|put together)(?: me| up| down)?(?: a| an| some| the)?(?: short| quick| brief| detailed| complete| full| good| study)* (?:notes?|summary|study notes|revision notes|cheat ?sheet) (?:on|about|for|of|regarding)\s+(.+)$/))) return { kind: 'gen_note', topic: s.replace(/^.*?\b(?:on|about|for|of|regarding)\s+/i, '').trim() || m[1] };
+  if ((m = n.match(/^(?:remind me to|dont let me forget to|do not forget to)\s+(.+)$/))) return { kind: 'add_task', text: m[1], exam: false };
+  if ((m = n.match(/^(?:add|create|new|make|schedule|set|put)\s+(?:a |an |new |my )*(task|todo|to do|reminder|exam|test|quiz|assignment|deadline|homework|revision)\s*(?:to|for|:|called|named)?\s*(.+)$/))) return { kind: 'add_task', text: s.replace(/^\s*\S+\s+(?:(?:a|an|new|my)\s+)*\S+\s*(?:to|for|:|called|named)?\s*/i, '').replace(/\s+(?:to|in|on)\s+(?:my |the )?(?:study )?(?:planner|plan|schedule|tasks|list)$/i, '').trim() || m[2], exam: /^(exam|test|quiz)$/.test(m[1]) };
+  if (/^(what|whats|what s)( is| are)?( my)?( due| coming up| pending| left| on)( today| tomorrow| this week| soon)?$/.test(n) || /^(show|list|view|check|read)( me| out)?( my| the)? (tasks|todos|to dos|deadlines|assignments|schedule|study plan|plan|planner)( for (today|tomorrow|this week))?$/.test(n)) return { kind: 'whats_due', range: /tomorrow/.test(n) ? 'tomorrow' : /today/.test(n) ? 'today' : /week|soon/.test(n) ? 'week' : 'all' };
+  if ((m = n.match(/^(?:mark|set|tick|check off|check|complete|finish|done with)\s+(?:task\s+)?(.+?)\s+(?:as\s+)?(?:done|complete|completed|finished)$/)) || (m = n.match(/^(?:complete|finish|tick off|check off|done with)\s+(?:task\s+)?(.+)$/))) return { kind: 'complete_task', q: m[1] };
   if (/^(explain|describe|summari[sz]e|what is|whats|what am i|tell me|why|how does|how do)\b/.test(n)) return { kind: 'explain', q: s };
   if (/^(help|what can you do|what can i say|commands|show commands)\b/.test(n)) return { kind: 'help' };
   if ((m = n.match(/^(search|find|look up|look for|lookup)( for)? (.+)$/))) return { kind: 'search', q: m[3] };
@@ -145,14 +169,14 @@ export function parseStep(raw: string): Intent {
 }
 
 export function parseCommand(text: string): Step[] {
-  text = text.replace(/^\s*(?:(?:hey|ok|okay)\s+)?(?:notes|computer|assistant|jarvis)\s*[,:]?\s+/i, '');
+  text = text.replace(/^\s*(?:(?:hey|ok|okay)\s+)?(?:notes|computer|assistant|jarvis|friday)\s*[,:]?\s+/i, '');
   return splitChain(text).map(raw => ({ raw, intent: parseStep(raw) }));
 }
 
 /** True when an utterance should be treated as a command and not typed into the notes (while dictating). */
 export function looksLikeCommand(text: string): boolean {
   if (/(->|→|=>)/.test(text)) return true;
-  if (/^\s*(?:hey |ok |okay )?(?:notes|computer|assistant|jarvis|command)\b/i.test(text)) return true;
+  if (/^\s*(?:hey |ok |okay )?(?:notes|computer|assistant|jarvis|friday|command)\b/i.test(text)) return true;
   return false;
 }
 

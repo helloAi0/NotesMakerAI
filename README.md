@@ -28,3 +28,18 @@ Adding a simulation: see `frontend/tools/SIM_AUTHORING.md`. Export `defineSim({.
 - **Click any word** in the notes (typed, dictated or AI-generated) and reading starts at exactly that word; **highlight** text to read from the highlighted start; **click inside the Edit box** to read from the caret. Toggle: *Voice → Click-to-speak*.
 - **Handwriting:** Draw tab → *Recognise handwriting* (local tesseract.js engine, files copied to `frontend/public/ocr` by `npm install`/`npm run dev`). Then in Read mode click any handwritten word to hear from there, or *To typed text*. Accuracy is best for neat print-style letters; cursive is unreliable.
 - **Dictation** streams words into the editor live and applies spoken formatting ("new line", "bullet", "heading …", "full stop").
+
+## FRIDAY: the built-in assistant and agent
+
+FRIDAY lives in the round button (Alt+A) on every screen and as a full chat page ("FRIDAY Assistant" in the sidebar). It has two jobs, both offline:
+
+* **Agent**: it operates the app from typed or spoken commands, chained with `->`, "then" or "and". Examples:
+  `Open AI segmentation -> go to the image processing module -> set model to U-Net -> run simulation`,
+  `write a note about Fourier series`, `summarize my pdf thermodynamics`, `create folder Physics`,
+  `move thermodynamics to folder Physics`, `import folder` (opens the file chooser), `add task revise optics by Friday`,
+  `what is due this week`, `mark revise optics done`, `add the summary to my notebook`, `open settings`.
+* **Study helper**: ask any study question or "how do I ... in this app". Answers come from a built-in STEM glossary, the app guide, all simulations, your notes and your PDFs (BM25 retrieval, sources shown). It also has a calculator (`12*7+sqrt(2)`). Add an AI key in Settings (Gemini, OpenAI, Anthropic, OpenRouter or a custom/Ollama endpoint) and it answers anything with a language model, grounded in your material; without a key it says honestly when something is outside its built-in knowledge.
+
+Other screens: Dashboard (streak, activity, tasks), Study Planner, AI Note Generator (offline from built-in knowledge, or AI), global search (Ctrl+K), Settings (AI key, backup/restore), PWA install and a full offline cache.
+
+Tests: `npx tsx tools/friday.mts`, `npx tsx tools/intents.mts`, and with `npx vite preview --port 5300` running: `BASE=http://127.0.0.1:5300 node tools/e2e_friday.mjs` (needs sample PDFs in `PDFDIR`, default `/tmp/pdfs`).
