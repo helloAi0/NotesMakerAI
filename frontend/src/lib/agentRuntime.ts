@@ -171,6 +171,8 @@ async function exec(intent: Intent, raw: string): Promise<StepResult> {
       // maybe the bare words are a button label of the open simulation ("shuffle", "fire")
       const s = cap('sim'); const w = norm(raw);
       if (s) { const a = (s.sim.actions ?? []).find(x => overlap(w, x.label) >= 0.99 || norm(x.label) === w); if (a) { s.doAction(a.id); return ok(`Pressed “${a.label}”.`); } }
+      const mm = norm(raw).match(/^(?:change|set|select|choose|pick|adjust|switch)\s+(?:the\s+)?(.+)$/);
+      if (s && mm) { const p = resolveParam(mm[1], s.sim.params); if (p) return no(`Tell me the value for ${p.label}, e.g. “set ${p.label} to ${p.kind === 'select' ? p.options[0].label : p.kind === 'number' ? p.value : 'on'}”.${p.kind === 'select' ? ' Options: ' + p.options.map(o => o.label).join(', ') + '.' : ''}`); }
       return no(`I did not understand “${raw}”. Say “help” for examples.`);
     }
   }

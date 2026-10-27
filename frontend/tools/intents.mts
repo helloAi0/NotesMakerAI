@@ -43,4 +43,7 @@ eq('done', I('mark revise optics done').kind, 'complete_task');
 eq('explain still', I('what is entropy').kind, 'explain');
 eq('open pdf', I('open pdf thermodynamics').kind, 'open_pdf');
 eq('pdf library nav', I('open pdf library'), { kind: 'navigate', view: 'library' });
+eq('chain write+read', kinds('open the notebook and write hello world then read this page aloud'), ['navigate', 'insert_text', 'read_aloud']);
+eq('chain pdf', kinds('open the library and create folder Thermo then summarize my pdf thermo'), ['navigate', 'make_folder', 'summarize_pdf']);
+eq('empty chain', parseCommand('-> ->').length, 0);
 console.log(fail ? `${fail} FAILED` : 'ALL PASS'); process.exit(fail ? 1 : 0);

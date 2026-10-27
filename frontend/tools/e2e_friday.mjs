@@ -4,6 +4,7 @@ const BASE = process.env.BASE || 'http://localhost:5300';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(() => chromium.launch());
 const ctx = await b.newContext({ viewport: { width: 1280, height: 800 } });
 const pg = await ctx.newPage(); pg.setDefaultTimeout(20000);
+const remote = []; pg.on('request', r => { const u = r.url(); if (!u.startsWith(BASE) && !u.startsWith('data:') && !u.startsWith('blob:')) remote.push(u); });
 const errs = []; pg.on('pageerror', e => errs.push(e.message));
 let fail = 0; const ok = (n, c, x = '') => { console.log(c ? 'PASS' : 'FAIL', n, c ? '' : x); if (!c) fail++; };
 const PDFDIR = process.env.PDFDIR || '/tmp/pdfs';
@@ -67,5 +68,6 @@ ok('dock opens sim', /Kalman/i.test(await pg.innerText('body')));
 // ---- persistence
 await pg.reload(); await pg.waitForTimeout(1500); await pg.click('[data-testid=nav-friday]');
 ok('chat history persisted', /backpropagation/i.test(await pg.innerText('[data-testid=friday-log]')));
+ok('no remote requests (fully standalone)', remote.length === 0, remote.join(' '));
 ok('no page errors', errs.length === 0, errs.join('|'));
 await b.close(); console.log(fail ? `${fail} FAILED` : 'ALL PASS'); process.exit(fail ? 1 : 0);

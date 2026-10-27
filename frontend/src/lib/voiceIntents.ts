@@ -79,8 +79,8 @@ const FILLER = /^(?:(?:hey|ok|okay)\s+)?(?:notes|computer|assistant|jarvis|frida
 export function splitChain(text: string): string[] {
   let t = text.replace(/[→⇒➔➜]/g, ' | ').replace(/-{1,2}>|=>/g, ' | ').replace(/\s>\s/g, ' | ');
   t = t.replace(/\s+(?:and then|then|after that|afterwards|next|finally|followed by)\s+/gi, ' | ');
-  t = t.replace(/\s+and\s+(?=(?:open|go to|set|run|start|play|pause|reset|select|choose|change|increase|decrease|turn|add|save|read|stop|show|press|click|use)\b)/gi, ' | ');
-  t = t.replace(/[.;]\s+(?=[A-Za-z])/g, ' | ').replace(/,\s+(?=(?:open|go to|set|run|start|select|choose|change|increase|decrease|turn|add|save|read|stop|press|click|use)\b)/gi, ' | ');
+  t = t.replace(/\s+and\s+(?=(?:open|go to|set|run|start|play|pause|reset|select|choose|change|increase|decrease|turn|add|save|read|stop|show|press|click|use|write|type|insert|dictate|summari[sz]e|create|make|move|import|upload|list|mark|complete|explain|search|find|generate|remind|close|go back)\b)/gi, ' | ');
+  t = t.replace(/[.;]\s+(?=[A-Za-z])/g, ' | ').replace(/,\s+(?=(?:open|go to|set|run|start|select|choose|change|increase|decrease|turn|add|save|read|stop|press|click|use|summari[sz]e|create|move|import|list|mark|generate|remind|close)\b)/gi, ' | ');
   return t.split('|').map(s => s.replace(/[.,!?]+$/g, '').trim()).filter(Boolean);
 }
 
