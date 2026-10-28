@@ -25,6 +25,8 @@ class Script:
         self.calls = []
 
     def __call__(self, req):
+        if req.method == "GET":
+            return httpx.Response(200, json={"models": [{"name": "fake"}]})
         body = json.loads(req.content)
         sys = body["messages"][0]["content"]
         if "planning module" in sys:
@@ -169,7 +171,7 @@ async def test_streaming_events_and_style_rules(tmp_path):
     s = Script([PLAN()], ["Rust has a borrow checker [1]."], [CRIT()])
     llm, store, agent = make(tmp_path, s, style_rule_min_score=0.05)
     store.add_text("Always answer in one short sentence about the borrow checker.", source="rule:1",
-                   metadata={"kind": "preference_rule"}, priority=1.0, chunk=False)
+                   metadata={"kind": "preference_rule", "scope": "topic"}, priority=1.0, chunk=False)
     async with llm:
         evs = [e async for e in agent.stream("Which language has a borrow checker?")]
     kinds = [e["event"] for e in evs]

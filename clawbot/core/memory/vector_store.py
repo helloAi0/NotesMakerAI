@@ -322,6 +322,13 @@ class VectorStore:
         hits.sort(key=lambda h: h.rank_score, reverse=True)
         return hits[:k]
 
+    def get_where(self, where: Mapping[str, Any], limit: int = 50) -> list[SearchHit]:
+        """Metadata-only lookup (no similarity). Results are ordered by priority, highest first."""
+        with self._lock:
+            res = self._col.get(where=dict(where), limit=limit, include=["documents", "metadatas"])
+        hits = [SearchHit(i, d, 1.0, 1.0, dict(m or {})) for i, d, m in zip(res["ids"], res["documents"], res["metadatas"])]
+        return sorted(hits, key=lambda h: float(h.metadata.get("priority", 0.0) or 0.0), reverse=True)
+
     def get_by_source(self, source: str) -> list[SearchHit]:
         with self._lock:
             res = self._col.get(where={"source": source}, include=["documents", "metadatas"])

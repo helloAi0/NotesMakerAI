@@ -17,6 +17,7 @@ events through LangGraph's custom stream, so a UI can render live graph state.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import operator
 import re
@@ -156,6 +157,7 @@ class AgentConfig:
     generation_temperature: float = 0.3
     style_rule_k: int = 4
     style_rule_min_score: float = 0.45
+    global_rule_limit: int = 6
 
 
 @dataclass
@@ -300,9 +302,18 @@ class Agent:
                 "_note": f"{len(docs)} chunks, best cosine {best:.2f}, {len(rules)} style rules"}
 
     async def _style_rules(self, q: str) -> list[str]:
-        hits = await self.deps.store.aquery(q, self.cfg.style_rule_k, where={"kind": "preference_rule"},
-                                            min_score=self.cfg.style_rule_min_score)
-        return [h.text for h in hits]
+        """Global rules (always on, highest priority first) + topical rules similar to the question."""
+        store = self.deps.store
+        global_hits = await asyncio.to_thread(store.get_where, {"$and": [{"kind": "preference_rule"}, {"scope": "global"}]},
+                                              self.cfg.global_rule_limit)
+        topical = await store.aquery(q, self.cfg.style_rule_k,
+                                     where={"$and": [{"kind": "preference_rule"}, {"scope": "topic"}]},
+                                     min_score=self.cfg.style_rule_min_score)
+        out: list[str] = []
+        for h in [*global_hits, *topical]:
+            if h.text not in out:
+                out.append(h.text)
+        return out
 
     async def _ingest_web(self, state: AgentState) -> dict[str, Any]:
         attempts = state.get("web_attempts", 0) + 1
