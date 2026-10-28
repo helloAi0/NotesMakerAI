@@ -6,3 +6,4 @@ numpy>=1.26
 pytest>=8
 pytest-asyncio>=0.23
 langgraph>=0.2
+playwright>=1.45
