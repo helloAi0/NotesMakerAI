@@ -14,11 +14,11 @@ ok('title', (await pg.title()) === 'Notes Maker AI');
 await pg.click('[data-testid=nav-dashboard]'); await pg.waitForSelector('[data-testid=dashboard-view]');
 ok('dashboard has stats', /day streak/.test(await pg.innerText('[data-testid=dashboard-view]')));
 // ---- FRIDAY page
-await pg.click('[data-testid=nav-friday]'); await pg.waitForSelector('[data-testid=friday-input]');
+await pg.click('[data-testid=nav-friday]'); await pg.click('[data-testid=tab-agent]').catch(() => {}); await pg.waitForSelector('[data-testid=friday-input]');
 const ask = async (q, re, n, wait = 1500) => { await pg.fill('[data-testid=friday-input]', q); await pg.click('[data-testid=friday-send]'); await pg.waitForTimeout(wait); const t = await pg.innerText('[data-testid=friday-log]'); ok(n || q, re.test(t.slice(-1500)), t.slice(-300)); return t; };
 await ask('what is backpropagation', /chain rule/i);
 await ask('how do I use click to speak', /click any word/i);
-await ask('12*7+3', /= 87/);
+await pg.click('[data-testid=tab-research]'); await ask('12*7+3', /= 87/); await pg.click('[data-testid=tab-agent]');
 await ask('hello', /FRIDAY/);
 await ask('what is the capital of Mongolia', /could not find|built-in/i);
 await ask('add task revise optics by friday', /Task added/);
@@ -35,7 +35,7 @@ await pg.click('[data-testid=nav-library]'); await pg.waitForSelector('[data-tes
 await pg.setInputFiles('[data-testid=pdf-input]', [PDFDIR + '/Thermodynamics.pdf']); await pg.waitForTimeout(3500);
 await pg.setInputFiles('[data-testid=pdf-folder-input]', [PDFDIR + '/Physics/Optics.pdf']).catch(() => {}); await pg.waitForTimeout(3000);
 ok('library shows pdf', /Thermodynamics/.test(await pg.innerText('body')));
-await pg.click('[data-testid=nav-friday]'); await pg.waitForSelector('[data-testid=friday-input]');
+await pg.click('[data-testid=nav-friday]'); await pg.click('[data-testid=tab-agent]').catch(() => {}); await pg.waitForSelector('[data-testid=friday-input]');
 await ask('list my pdfs', /Thermodynamics\.pdf/, 'list pdfs');
 await ask('create folder Thermo', /Folder .Thermo. is ready/, 'make folder');
 await ask('move thermodynamics to folder Thermo', /Moved .Thermodynamics\.pdf. to folder .Thermo./, 'move pdf');
@@ -43,15 +43,15 @@ await ask('tell friday to summarize my pdf thermodynamics', /Summary of .Thermod
 await ask('what does my pdf say about entropy', /PDF|entropy/i, 'answer from pdf');
 await pg.fill('[data-testid=friday-input]', 'open pdf thermodynamics'); await pg.click('[data-testid=friday-send]'); await pg.waitForTimeout(1500);
 ok('open pdf navigates to library', await pg.locator('[data-testid=pdf-input]').count() > 0);
-await pg.click('[data-testid=nav-friday]'); ok('open pdf reply', /Opened/.test(await pg.innerText('[data-testid=friday-log]')));
+await pg.click('[data-testid=nav-friday]'); await pg.click('[data-testid=tab-agent]').catch(() => {}); ok('open pdf reply', /Opened/.test(await pg.innerText('[data-testid=friday-log]')));
 await pg.fill('[data-testid=friday-input]', 'import folder'); await pg.click('[data-testid=friday-send]'); await pg.waitForTimeout(1200);
-await pg.click('[data-testid=nav-friday]'); ok('import prompt', /Choose the folder/.test(await pg.innerText('[data-testid=friday-log]')));
+await pg.click('[data-testid=nav-friday]'); await pg.click('[data-testid=tab-agent]').catch(() => {}); ok('import prompt', /Choose the folder/.test(await pg.innerText('[data-testid=friday-log]')));
 // ---- notebook commands
 await pg.fill('[data-testid=friday-input]', 'write a note about gradient descent'); await pg.click('[data-testid=friday-send]'); await pg.waitForTimeout(3000);
 await pg.waitForTimeout(500); ok('notebook open with notes', /Gradient descent/i.test(await pg.locator('textarea').first().inputValue()));
-await pg.click('[data-testid=nav-friday]'); ok('gen note reply', /Wrote offline notes/.test(await pg.innerText('[data-testid=friday-log]')));
-await pg.click('[data-testid=nav-notebook]'); await pg.click('[data-testid=assistant-toggle]'); await pg.fill('[data-testid=assistant-input]', 'summarize this page'); await pg.click('[data-testid=assistant-send]'); await pg.waitForTimeout(1500); ok('summarize page', /Summary of this page/.test(await pg.innerText('[data-testid=assistant-log]'))); await pg.click('[aria-label="Close assistant"]');
-await pg.click('[data-testid=nav-friday]'); await ask('summarize this page', /Summary of this page|too little|notebook/i, 'summarize page');
+await pg.click('[data-testid=nav-friday]'); await pg.click('[data-testid=tab-agent]').catch(() => {}); ok('gen note reply', /Wrote offline notes/.test(await pg.innerText('[data-testid=friday-log]')));
+await pg.click('[data-testid=nav-notebook]'); await pg.click('[data-testid=assistant-toggle]'); await pg.click('[data-testid=track-agent]'); await pg.fill('[data-testid=assistant-input]', 'summarize this page'); await pg.click('[data-testid=assistant-send]'); await pg.waitForTimeout(1500); ok('summarize page', /Summary of this page/.test(await pg.innerText('[data-testid=assistant-log]'))); await pg.click('[aria-label="Close assistant"]');
+await pg.click('[data-testid=nav-friday]'); await pg.click('[data-testid=tab-agent]').catch(() => {}); await ask('summarize this page', /Summary of this page|too little|notebook/i, 'summarize page');
 // ---- generator
 await pg.click('[data-testid=nav-generator]'); await pg.fill('[data-testid=gen-topic]', 'Fourier transform'); await pg.click('[data-testid=gen-go]'); await pg.waitForSelector('[data-testid=gen-out]');
 ok('generator output', /Fourier/i.test(await pg.innerText('[data-testid=gen-out]')));
@@ -62,11 +62,11 @@ await pg.keyboard.press('Escape');
 await pg.click('[data-testid=open-settings]'); await pg.waitForSelector('[data-testid=settings-modal]');
 ok('settings open', /AI provider/.test(await pg.innerText('[data-testid=settings-modal]'))); await pg.keyboard.press('Escape');
 // ---- dock still works on other screens
-await pg.click('[data-testid=nav-dashboard]'); await pg.click('[data-testid=assistant-toggle]');
+await pg.click('[data-testid=nav-dashboard]'); await pg.click('[data-testid=assistant-toggle]'); await pg.click('[data-testid=track-agent]');
 await pg.fill('[data-testid=assistant-input]', 'open kalman filter'); await pg.click('[data-testid=assistant-send]'); await pg.waitForTimeout(3500);
 ok('dock opens sim', /Kalman/i.test(await pg.innerText('body')));
 // ---- persistence
-await pg.reload(); await pg.waitForTimeout(1500); await pg.click('[data-testid=nav-friday]');
+await pg.reload(); await pg.waitForTimeout(1500); await pg.click('[data-testid=nav-friday]'); await pg.click('[data-testid=tab-agent]').catch(() => {});
 ok('chat history persisted', /backpropagation/i.test(await pg.innerText('[data-testid=friday-log]')));
 ok('no remote requests (fully standalone)', remote.length === 0, remote.join(' '));
 ok('no page errors', errs.length === 0, errs.join('|'));

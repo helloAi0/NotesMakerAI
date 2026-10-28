@@ -45,7 +45,10 @@ await pg.locator('[data-testid=click-speak-toggle]').check();
 await mode('Edit'); await clear();
 await pg.evaluate(() => { const ta = document.querySelector('textarea'), p = ta.value.indexOf('zeta') + 2; ta.focus(); ta.setSelectionRange(p, p); ta.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 await pg.waitForTimeout(300); sp = await pg.evaluate(() => window.__spoken.join(' | '));
-ok('click in typing box reads from the word under the caret', /^zeta eta/i.test(sp), sp);
+ok('click in typing box never speaks (no repeat of typed text)', sp === '', sp);
+await pg.evaluate(() => { const ta = document.querySelector('textarea'); ta.focus(); ta.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true })); ta.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+await pg.waitForTimeout(300); sp = await pg.evaluate(() => window.__spoken.join(' | '));
+ok('space / further clicks in typing box stay silent', sp === '', sp);
 
 // --- 6. live streaming dictation into the editor
 await tab('Voice'); await pg.click('button:has-text("Start dictation")'); await pg.waitForTimeout(300);

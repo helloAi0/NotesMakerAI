@@ -1,5 +1,5 @@
 import { Bot } from 'lucide-react';
-import FridayChat from './FridayChat';
+import FridayTracks from './FridayTracks';
 
 /** Full-page FRIDAY: chat with the study helper about the app or any subject. */
 export default function FridayView() {
@@ -12,7 +12,7 @@ export default function FridayView() {
           <li>“Explain Fourier transform”</li><li>“How do I use click to speak?”</li><li>“Open Kalman filter → set noise to 3 → run”</li><li>“Summarize my pdf thermodynamics”</li><li>“Create folder Physics”, “move thermo notes to Physics”</li><li>“Write a note about Laplace transform”</li><li>“Add task revise optics by Friday”</li><li>“12*7+sqrt(2)”</li>
         </ul>
       </aside>
-      <section className="flex-1 min-w-0 min-h-0 flex flex-col"><FridayChat variant="page" prefix="friday" /></section>
+      <section className="flex-1 min-w-0 min-h-0 flex flex-col"><FridayTracks variant="page" prefix="friday" /></section>
     </div>
   );
 }

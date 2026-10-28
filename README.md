@@ -43,3 +43,11 @@ FRIDAY lives in the round button (Alt+A) on every screen and as a full chat page
 Other screens: Dashboard (streak, activity, tasks), Study Planner, AI Note Generator (offline from built-in knowledge, or AI), global search (Ctrl+K), Settings (AI key, backup/restore), PWA install and a full offline cache.
 
 Tests: `npx tsx tools/friday.mts`, `npx tsx tools/intents.mts`, and with `npx vite preview --port 5300` running: `BASE=http://127.0.0.1:5300 node tools/e2e_friday.mjs` (needs sample PDFs in `PDFDIR`, default `/tmp/pdfs`).
+
+## Voice matrix, FRIDAY tracks and new simulations
+- **Click-to-speak** reads only when you click directly on a word in Read mode; the typing box never speaks.
+- **Edit pane** has a Dictate mic, a Read Page button and the Voice Modulation Matrix (English, Hindi, Arabic, Marathi, French, German; male/female; deep or melodic).
+- **FRIDAY** opens to two tracks: Research Knowledge Engine and Agentic OS / File Voice Controller. Without an AI key it runs structured commands offline; with a key in Settings it plans free-form goals in a loop.
+- **Play** auto-sweeps one parameter on static simulations so something always moves.
+- New sims: Black–Scholes + Greeks, bullwhip, Nash equilibrium, DNA alignment, particle-filter localisation with LiDAR, planar quadcopter, 6-DOF arm FK/IK, Red-Black tree, Q-learning, Raft, ZK 3-colouring demo, traffic anomaly detector, CMOS inverter, Carnot cycle, NMR/IR, Ising, N-body, lattice-Boltzmann flow.
+- Tests: `npx tsx tools/{intents,fmt,friday,logic_cs,logic_sci,fuzz}.mts`, then e2e scripts against `vite preview`.

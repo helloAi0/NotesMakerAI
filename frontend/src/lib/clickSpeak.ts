@@ -61,3 +61,18 @@ export function wordStart(value: string, pos: number): number {
   while (p > 0 && !/\s/.test(value[p - 1])) p--;
   return p;
 }
+
+/** True only when the point (x, y) lies on the glyphs of the word at (node, offset), not on blank space, margins or below the line. */
+export function pointOnWord(node: Node | null, offset: number, x: number, y: number): boolean {
+  if (!node || node.nodeType !== Node.TEXT_NODE) return false;
+  const t = node.textContent ?? ''; if (!t.trim()) return false;
+  let a = Math.min(offset, t.length), b = a;
+  if (a < t.length && !/\s/.test(t[a])) { /* inside or at start of a word */ } else if (a > 0 && !/\s/.test(t[a - 1])) a--; else return false;
+  b = a; while (a > 0 && !/\s/.test(t[a - 1])) a--; while (b < t.length && !/\s/.test(t[b])) b++;
+  if (b <= a) return false;
+  try {
+    const r = document.createRange(); r.setStart(node, a); r.setEnd(node, b);
+    for (const q of Array.from(r.getClientRects())) if (x >= q.left - 1 && x <= q.right + 1 && y >= q.top - 1 && y <= q.bottom + 1) return true;
+  } catch { /* range failed */ }
+  return false;
+}

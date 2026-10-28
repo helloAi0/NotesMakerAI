@@ -1,4 +1,5 @@
 import { touch } from '../lib/activity';
+import { SWEEP } from '../sims/sweepMap';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, Pause, Play, RotateCcw, StepForward, Camera, Download,
@@ -55,6 +56,8 @@ export default function SimPlayer({ sim, onBack, initialValues, notebookContext 
 
   const valsRef = useRef<Values>(mergedDefaults);
   const playRef = useRef(true);
+  const sweepSpec = ((sim as { sweep?: string }).sweep ?? SWEEP[sim.id]) || '';
+  const sweepOff = useRef(false); const sweepPhase = useRef(0);
   const speedRef = useRef(1);
   const simTime = useRef(0);
 
@@ -101,7 +104,7 @@ export default function SimPlayer({ sim, onBack, initialValues, notebookContext 
     rebuild();
   }, [mergedDefaults, rebuild]);
 
-  useEffect(() => { playRef.current = playing; }, [playing]);
+  useEffect(() => { playRef.current = playing; if (playing) sweepOff.current = false; }, [playing]);
   useEffect(() => { speedRef.current = speed; }, [speed]);
 
   // canvas sizing
@@ -135,6 +138,15 @@ export default function SimPlayer({ sim, onBack, initialValues, notebookContext 
       if (!cv || s == null) return;
       const frame = Math.min(0.05, (now - last) / 1000);
       last = now;
+      if (playRef.current && sweepSpec && !sweepOff.current) {
+        // This simulation has no motion of its own: Play auto-sweeps one control so the effect is visible.
+        const sp = Math.max(0.1, speedRef.current); const prev = sweepPhase.current; sweepPhase.current += frame * sp * 0.15; const ph = sweepPhase.current; let next: Record<string, number | string | boolean> | null = null;
+        if (/^[A-Za-z0-9_-]+$/.test(sweepSpec)) { const p = sim.params.find(q => q.id === sweepSpec); if (p && p.kind === 'number') { const t = 0.5 - 0.5 * Math.cos(ph * Math.PI * 2); const raw = p.min + (p.max - p.min) * t; const snapped = Math.round((raw - p.min) / p.step) * p.step + p.min; if (snapped !== valsRef.current[p.id]) next = { [p.id]: +Math.min(p.max, Math.max(p.min, snapped)).toFixed(6) }; } }
+        else if (sweepSpec.startsWith('toggles:')) { const ids = sweepSpec.slice(8).split(','); const k = Math.floor(ph * 3) % (1 << ids.length); if (Math.floor(prev * 3) !== Math.floor(ph * 3) || valsRef.current[ids[0]] === undefined) { next = {}; ids.forEach((id, i) => { next![id] = !!((k >> i) & 1); }); } }
+        else if (sweepSpec.startsWith('select:')) { const p = sim.params.find(q => q.id === sweepSpec.slice(7)); if (p && p.kind === 'select') { const k = Math.floor(ph * 2.5) % p.options.length; if (valsRef.current[p.id] !== p.options[k].value) next = { [p.id]: p.options[k].value }; } }
+        else if (sweepSpec.startsWith('action:')) { if (Math.floor(prev * 8) !== Math.floor(ph * 8) && stateRef.current != null) { sim.action?.(stateRef.current, valsRef.current, sweepSpec.slice(7)); } }
+        if (next) { const rb = sim.params.some(q => q.id in next! && (q as { resetOnChange?: boolean }).resetOnChange); valsRef.current = { ...valsRef.current, ...next }; setVals(valsRef.current); if (rb) { stateRef.current = sim.init(valsRef.current); } }
+      }
       if (playRef.current) {
         acc += frame * speedRef.current;
         let n = 0;
@@ -159,6 +171,7 @@ export default function SimPlayer({ sim, onBack, initialValues, notebookContext 
   }, [sim]);
 
   const setParam = (id: string, v: number | string | boolean, resets?: boolean) => {
+    if (sweepSpec) sweepOff.current = true; // the student took over the sweeping control
     valsRef.current = { ...valsRef.current, [id]: v };
     setVals(valsRef.current);
     if (resets) rebuild();
@@ -417,6 +430,7 @@ Answer in at most 180 words, referring to the actual numbers above. Use LaTeX wi
             <button onClick={() => setPlaying(p => !p)} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-semibold">
               {playing ? <Pause size={15} /> : <Play size={15} />} {playing ? 'Pause' : 'Play'}
             </button>
+            {sweepSpec && <span data-testid="sweep-note" className="text-[11px] text-slate-500 max-w-[16rem]">{playing && !sweepOff.current ? 'Play auto-sweeps a control so you can see the effect; drag any slider to take over.' : 'Static analysis: Play auto-sweeps a control (press Play).'}</span>}
             <button onClick={stepOnce} disabled={playing} title="Advance a few milliseconds" className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm disabled:opacity-40">
               <StepForward size={15} /> Step
             </button>

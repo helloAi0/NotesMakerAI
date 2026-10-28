@@ -9,7 +9,7 @@ import MarkdownView from './MarkdownView';
 import EquationDictation from './EquationDictation';
 import { useReader, useDictation, applyVoiceCommands, SPEECH_LANGS } from '../lib/useVoice';
 import { splitSentences, type SpeechSegment } from '../lib/speechUtils';
-import { caretAtPoint, domTokenIndex, sliceFromToken, wordStart } from '../lib/clickSpeak';
+import { caretAtPoint, domTokenIndex, sliceFromToken, pointOnWord } from '../lib/clickSpeak';
 import type { OcrWord } from '../lib/ocr';
 import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../lib/aiClient';
 
@@ -17,6 +17,7 @@ import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../
 import VisualsStudio from './VisualsStudio';
 import MicTest from './MicTest';
 import VoicePicker from './VoicePicker';
+import VoiceMatrix from './VoiceMatrix';
 import { register } from '../lib/agentBus';
 import { looksLikeCommand } from '../lib/voiceIntents';
 import ExperimentCard from './ExperimentCard';
@@ -53,6 +54,7 @@ type ShapeObj = {
 export default function NotebookWorkspace({ notebookData }: NotebookWorkspaceProps) {
   const [activeTab, setActiveTab] = useState<'Home' | 'Insert' | 'Draw' | 'Voice' | 'AI Assistant' | 'Shape Format' | 'Visuals'>('Home');
   const [paperStyle, setPaperStyle] = useState<'ruled' | 'grid' | 'plain' | 'dark'>('ruled');
+  const [showMatrix, setShowMatrix] = useState(false);
   const [inputMode, setInputMode] = useState<'pen' | 'keyboard' | 'read' | 'shapes'>('read');
   const [tool, setTool] = useState<'pen' | 'highlighter' | 'eraser' | 'rectangle' | 'circle' | 'arrow' | 'line'>('pen');
   const [currentPage, setCurrentPage] = useState(1);
@@ -456,10 +458,10 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     if (root && node) { const k = domTokenIndex(root, node, offset); if (k > 0) segs[i] = { ...segs[i], text: sliceFromToken(segs[i].text, k) }; }
     reader.playFrom(segs, i);
   };
-  const speakAtPoint = (id: string, el: HTMLElement, x: number, y: number) => { const c = caretAtPoint(x, y); speakFrom(id, el, c && el.contains(c.node) ? c.node : null, c?.offset ?? 0); };
+  const speakAtPoint = (id: string, el: HTMLElement, x: number, y: number) => { if (inputModeRef.current !== 'read') return; const c = caretAtPoint(x, y); if (!c || !el.contains(c.node) || !pointOnWord(c.node, c.offset, x, y)) return; /* only a click that lands ON a word speaks */ speakFrom(id, el, c.node, c.offset); };
   /** Highlighting text with the mouse/finger starts reading from the first highlighted word. */
   const speakFromSelection = () => {
-    if (!clickSpeakRef.current) return;
+    if (!clickSpeakRef.current || inputModeRef.current !== 'read') return;
     const sel = window.getSelection(); if (!sel || sel.isCollapsed || !sel.rangeCount) return;
     const r = sel.getRangeAt(0), startEl = (r.startContainer.nodeType === 1 ? r.startContainer as HTMLElement : r.startContainer.parentElement)?.closest('[data-seg]') as HTMLElement | null;
     if (!startEl) return;
@@ -467,14 +469,6 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     const k = domTokenIndex(startEl, r.startContainer, r.startOffset), segs = allSegs.slice();
     if (k > 0) segs[i] = { ...segs[i], text: sliceFromToken(segs[i].text, k) };
     reader.playFrom(segs, i);
-  };
-  /** Click (or highlight) inside the typing box: read from the clicked word onwards. */
-  const speakFromTextarea = (ta: HTMLTextAreaElement) => {
-    if (!clickSpeakRef.current || ta.selectionStart == null) return;
-    const v = ta.value; if (!v.trim()) return;
-    const from = wordStart(v, ta.selectionStart), segs: SpeechSegment[] = []; let n = 0;
-    for (const line of v.slice(from).split('\n')) for (const t of splitSentences(line)) segs.push({ id: `ta-${n++}`, text: t });
-    if (segs.length) reader.playFrom(segs, 0);
   };
   // ---- handwriting (pen) -> text, fully offline ----
   const hwLines = (page: number): { id: string; text: string; words: number[] }[] => {
@@ -775,6 +769,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                     <button onClick={reader.stop} disabled={reader.state === 'idle'} aria-label="Stop" className="p-1.5 rounded bg-red-600 text-white disabled:opacity-40"><StopSquare className="w-3.5 h-3.5"/></button>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
+                    <VoiceMatrix reader={reader} />
                     <VoicePicker reader={reader} />
                     {reader.state !== 'idle' && <span className="text-slate-500">Sentence {Math.max(reader.index, 0) + 1} / {reader.count}</span>}
                   </div>
@@ -913,14 +908,21 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                       value={pageTypedText[currentPage] || ''}
                       onChange={(e) => { caretRef.current = e.target.selectionStart; interimRng.current = null; if (reader.state !== 'idle') reader.stop(); setNotesFor(currentPage, e.target.value); }}
                       onSelect={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
-                      onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; if (dict.state === 'idle' && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) speakFromTextarea(e.currentTarget); }}
-                      onMouseUp={(e) => { if (dict.state === 'idle' && e.currentTarget.selectionStart !== e.currentTarget.selectionEnd) speakFromTextarea(e.currentTarget); }}
+                      onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
                       onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
                       placeholder="Type notes here, or use the Voice tab to dictate. Math: $x^2$"
                       className="w-full text-slate-900 text-base font-sans p-3 bg-amber-50/30 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-y leading-relaxed min-h-[140px]"
                     />
                     {dict.interim && <p className="text-xs text-slate-500 italic mt-1">Hearing: {dict.interim}</p>}
-                    <button onClick={() => setInputMode('read')} className="mt-2 text-xs font-semibold px-3 py-1.5 rounded bg-slate-800 text-white">Done editing — read mode</button>
+                    <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="edit-pane-controls">
+                      {dict.state === 'listening' || dict.state === 'starting'
+                        ? <button data-testid="edit-dictate" onClick={dict.stop} aria-label="Stop Speech-to-Text Dictation" className="text-xs font-semibold px-3 py-1.5 rounded bg-red-600 text-white flex items-center gap-1 animate-pulse"><Mic className="w-3.5 h-3.5" /> Stop dictation</button>
+                        : <button data-testid="edit-dictate" onClick={startDictation} disabled={!dict.supported} title={dict.supported ? 'Speak: text is typed at the cursor as you talk' : 'Speech recognition needs Chrome or Edge'} aria-label="Speech-to-Text Dictation" className="text-xs font-semibold px-3 py-1.5 rounded bg-amber-600 text-white flex items-center gap-1 disabled:opacity-40"><Mic className="w-3.5 h-3.5" /> Speech-to-Text Dictation</button>}
+                      <button data-testid="edit-read-page" onClick={playPage} className="text-xs font-semibold px-3 py-1.5 rounded bg-slate-100 border flex items-center gap-1"><Play className="w-3.5 h-3.5" /> Read Page</button>
+                      <button onClick={() => setShowMatrix(m => !m)} aria-expanded={showMatrix} className="text-xs font-semibold px-3 py-1.5 rounded bg-slate-100 border">Voice Modulation Matrix {showMatrix ? '▲' : '▼'}</button>
+                      <button onClick={() => setInputMode('read')} className="text-xs font-semibold px-3 py-1.5 rounded bg-slate-800 text-white">Done editing — read mode</button>
+                    </div>
+                    {showMatrix && <div className="mt-2"><VoiceMatrix reader={reader} /></div>}
                   </div>
                 ) : (
                   <div className="w-full text-slate-900 text-base font-sans whitespace-pre-wrap" style={{ lineHeight: '30px', minHeight: '120px' }}>

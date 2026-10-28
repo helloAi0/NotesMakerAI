@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
-import FridayChat from './FridayChat';
+import FridayTracks from './FridayTracks';
 
 /** Floating FRIDAY: available on every screen (Alt+A). Shares its conversation with the full FRIDAY page. */
 export default function AssistantDock({ hidden = false }: { hidden?: boolean }) {
@@ -14,7 +14,7 @@ export default function AssistantDock({ hidden = false }: { hidden?: boolean }) 
   );
   return (
     <div data-testid="assistant-panel" className="no-print fixed right-2 md:right-4 bottom-2 md:bottom-4 z-[60] w-[calc(100vw-1rem)] max-w-[26rem] h-[min(36rem,calc(100vh-5rem))] flex flex-col rounded-2xl overflow-hidden shadow-2xl border border-slate-300 bg-white">
-      <FridayChat variant="dock" prefix="assistant" onClose={() => setOpen(false)} />
+      <FridayTracks variant="dock" prefix="assistant" onClose={() => setOpen(false)} />
     </div>
   );
 }

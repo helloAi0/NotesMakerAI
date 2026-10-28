@@ -3,7 +3,7 @@
  * Every step reports honestly whether it worked; nothing is pretended.
  */
 import { cap, waitFor, sleep } from './agentBus';
-import { parseCommand, resolveSim, resolveParam, resolveOption, parseNumber, parseBool, overlap, norm } from './voiceIntents';
+import { parseCommand, parseStep, resolveSim, resolveParam, resolveOption, parseNumber, parseBool, overlap, norm } from './voiceIntents';
 import type { Intent } from './voiceIntents';
 import { SIMS } from '../sims/registry';
 import { resolveCurriculum } from '../sims/curriculumCatalog';
@@ -176,6 +176,13 @@ async function exec(intent: Intent, raw: string): Promise<StepResult> {
       return no(`I did not understand “${raw}”. Say “help” for examples.`);
     }
   }
+}
+
+/** Run exactly one already-split command (no chain splitting), e.g. a step planned by the language model. */
+export async function runOne(raw: string): Promise<StepResult> {
+  const step = parseCommand(raw)[0] && { raw, intent: parseStep(raw) };
+  if (!step) return { raw, ok: false, message: 'Empty command.' };
+  try { return await exec(step.intent, raw); } catch (e) { return { raw, ok: false, message: `Failed: ${(e as Error).message}` }; }
 }
 
 /** Run a spoken/typed command. Several steps can be chained with “->”, “then” or “and”. */
