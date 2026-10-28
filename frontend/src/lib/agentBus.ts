@@ -5,7 +5,7 @@
  */
 import type { AnySim, Values } from '../sims/types';
 
-export type ViewId = 'dashboard' | 'generator' | 'notebook' | 'simulations' | 'planner' | 'library' | 'friday';
+export type ViewId = 'dashboard' | 'generator' | 'notebook' | 'simulations' | 'planner' | 'library' | 'friday' | 'clawbot';
 
 export interface AppCaps {
   view: () => ViewId;
