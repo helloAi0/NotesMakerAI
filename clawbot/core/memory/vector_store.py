@@ -267,6 +267,7 @@ class VectorStore:
         if not pieces:
             return []
         base = _clean_meta(metadata)
+        base.setdefault("kind", "document")
         base.update({"source": source, "priority": float(priority), "ingested_at": time.time(),
                      "n_chunks": len(pieces)})
         seen: set[str] = set()
