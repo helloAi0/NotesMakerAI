@@ -146,7 +146,7 @@ export const poleZero = defineSim<T>({
 
 /* ================= Root locus ================= */
 function roots3(a2: number, a1: number, a0: number): Cx[] {
-  let r: Cx[] = [[1, 0.2], [-0.8, 0.9], [-0.5, -0.7]];
+  const r: Cx[] = [[1, 0.2], [-0.8, 0.9], [-0.5, -0.7]];
   for (let it = 0; it < 80; it++) for (let i = 0; i < 3; i++) {
     let num2: Cx = [1, 0]; const z = r[i]; // p(z)=z^3+a2 z^2+a1 z+a0
     const z2 = cmul(z, z), z3 = cmul(z2, z); num2 = [z3[0] + a2 * z2[0] + a1 * z[0] + a0, z3[1] + a2 * z2[1] + a1 * z[1]];

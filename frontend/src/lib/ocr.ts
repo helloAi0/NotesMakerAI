@@ -2,7 +2,7 @@
 export interface OcrWord { text: string; x0: number; y0: number; x1: number; y1: number; line: number }
 export interface OcrResult { words: OcrWord[]; lines: string[] }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 let workerP: Promise<any> | null = null;
 const base = () => (import.meta.env.BASE_URL || '/').replace(/\/?$/, '/') + 'ocr/';
 
@@ -31,7 +31,7 @@ export async function recognize(canvas: HTMLCanvasElement, scale = 1.5): Promise
   const prepared = inkToBlackOnWhite(canvas, scale), worker = await getWorker();
   const res = await worker.recognize(prepared, {}, { blocks: true });
   const words: OcrWord[] = [], lines: string[] = []; let li = 0;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   for (const b of (res.data.blocks ?? []) as any[]) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) {
     const ws: string[] = [];
     for (const w of l.words ?? []) { const t = String(w.text ?? '').trim(); if (!t || (w.confidence ?? 0) < 20) continue; words.push({ text: t, x0: w.bbox.x0 / scale, y0: w.bbox.y0 / scale, x1: w.bbox.x1 / scale, y1: w.bbox.y1 / scale, line: li }); ws.push(t); }

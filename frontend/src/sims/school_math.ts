@@ -299,7 +299,7 @@ export const ftc = defineSim<FtS>({
 /* ================================================================== */
 
 interface V3S { dAz: number; dEl: number; lx: number; ly: number; drag: boolean }
-const view3 = (s: { dAz: number; dEl: number }, v: Values) => proj3(rad(num(v, 'az')) + s.dAz, clamp(rad(num(v, 'el')) + s.dEl, -1.5, 1.5));
+const view3 = (s: { dAz: number; dEl: number }, v: Values) => proj3(rad(num(v, 'va')) + s.dAz, clamp(rad(num(v, 've')) + s.dEl, -1.5, 1.5));
 function drag3(s: { dAz: number; dEl: number; lx: number; ly: number; drag: boolean }, e: { kind: string; x: number; y: number }) {
   if (e.kind === 'down') { s.drag = true; s.lx = e.x; s.ly = e.y; }
   else if (e.kind === 'move' && s.drag) { s.dAz += (e.x - s.lx) * 0.012; s.dEl += (e.y - s.ly) * 0.012; s.lx = e.x; s.ly = e.y; }
@@ -332,11 +332,53 @@ export const vectors3d = defineSim<V3S>({
   params: [
     { kind: 'number', id: 'ax', label: 'a: x', min: -5, max: 5, step: 0.5, value: 3 }, { kind: 'number', id: 'ay', label: 'a: y', min: -5, max: 5, step: 0.5, value: 1 }, { kind: 'number', id: 'az', label: 'a: z', min: -5, max: 5, step: 0.5, value: 2 },
     { kind: 'number', id: 'bx', label: 'b: x', min: -5, max: 5, step: 0.5, value: -1 }, { kind: 'number', id: 'by', label: 'b: y', min: -5, max: 5, step: 0.5, value: 3 }, { kind: 'number', id: 'bz', label: 'b: z', min: -5, max: 5, step: 0.5, value: 1 },
-    { kind: 'number', id: 'az0', label: 'View azimuth', min: -180, max: 180, step: 5, value: -40, unit: '°' }, { kind: 'toggle', id: 'plane', label: 'Show parallelogram & projection', value: true },
-  ].map(p => (p.id === 'az0' ? { ...p, id: 'az' } : p)) as never,
+    { kind: 'number', id: 'va', label: 'View azimuth', min: -180, max: 180, step: 5, value: -40, unit: '°' }, { kind: 'number', id: 've', label: 'View elevation', min: -80, max: 80, step: 5, value: 25, unit: '°' },
+    { kind: 'toggle', id: 'plane', label: 'Show parallelogram & projection', value: true },
+  ],
   previewSeconds: 0,
   init() { return { dAz: 0, dEl: 0, lx: 0, ly: 0, drag: false }; },
-  step() { /* static */ },
-  draw() { /* replaced below */ },
-  readouts: () => [],
+  step() { /* static scene: rotate by dragging or with the view sliders */ },
+  pointer(s, _v, e) { drag3(s, e); },
+  draw(c, s, v, w, h) {
+    c.fillStyle = C.bg; c.fillRect(0, 0, w, h);
+    const A = [num(v, 'ax'), num(v, 'ay'), num(v, 'az')], B = [num(v, 'bx'), num(v, 'by'), num(v, 'bz')], X3 = cross3(A, B);
+    const P = view3(s, v), R = 5, sc = Math.min(w * 0.5, h * 0.5) / (R * 1.45), cx = w * 0.5, cy = h * 0.55;
+    const X = (a: number) => cx + a * sc, Y = (b: number) => cy - b * sc;
+    axes3(c, P, X, Y, R);
+    const pt = (q: number[]) => { const p = P(q[0], q[1], q[2]); return [X(p[0]), Y(p[1])]; };
+    const O = pt([0, 0, 0]), pa = pt(A), pb = pt(B), pab = pt([A[0] + B[0], A[1] + B[1], A[2] + B[2]]);
+    const la = len3(A), lb = len3(B), d = dot3(A, B), lx = len3(X3);
+    if (bool(v, 'plane')) {
+      c.fillStyle = 'rgba(34,211,238,0.14)'; c.beginPath(); c.moveTo(O[0], O[1]); c.lineTo(pa[0], pa[1]); c.lineTo(pab[0], pab[1]); c.lineTo(pb[0], pb[1]); c.closePath(); c.fill();
+      c.strokeStyle = 'rgba(34,211,238,0.5)'; c.lineWidth = 1; c.stroke();
+      if (lb > 1e-9) { const k = d / (lb * lb), pr = pt([B[0] * k, B[1] * k, B[2] * k]); line(c, O[0], O[1], pr[0], pr[1], C.orange, 2.5, [5, 4]); line(c, pa[0], pa[1], pr[0], pr[1], C.dim, 1, [3, 3]); circle(c, pr[0], pr[1], 3.5, C.orange); }
+    }
+    arrow(c, O[0], O[1], pa[0], pa[1], C.red, 3, 9); text(c, 'a', pa[0] + 6, pa[1] - 4, C.red, 13, 'left', 'alphabetic', true);
+    arrow(c, O[0], O[1], pb[0], pb[1], C.green, 3, 9); text(c, 'b', pb[0] + 6, pb[1] - 4, C.green, 13, 'left', 'alphabetic', true);
+    if (lx > 1e-9) {
+      const k = Math.min(1, (R * 0.95) / lx), pc = pt([X3[0] * k, X3[1] * k, X3[2] * k]);
+      arrow(c, O[0], O[1], pc[0], pc[1], C.amber, 3, 9); text(c, k < 1 ? 'a×b (scaled to fit)' : 'a×b', pc[0] + 6, pc[1] - 4, C.amber, 12, 'left', 'alphabetic', true);
+    }
+    circle(c, O[0], O[1], 3, C.white);
+    text(c, `a·b = ${fmt(d, 2)}`, 12, 20, C.text, 13, 'left', 'alphabetic', true);
+    text(c, `|a×b| = ${fmt(lx, 2)}  (parallelogram area)`, 12, 38, C.amber, 12);
+    if (la > 1e-9 && lb > 1e-9) text(c, `θ = ${fmt(deg(Math.acos(clamp(d / (la * lb), -1, 1))), 1)}°`, 12, 56, C.cyan, 12);
+    text(c, 'drag to rotate', w - 10, h - 10, C.dim, 10, 'right');
+  },
+  readouts(_s, v) {
+    const A = [num(v, 'ax'), num(v, 'ay'), num(v, 'az')], B = [num(v, 'bx'), num(v, 'by'), num(v, 'bz')], X3 = cross3(A, B), la = len3(A), lb = len3(B), d = dot3(A, B), lx = len3(X3);
+    const th = la > 1e-9 && lb > 1e-9 ? deg(Math.acos(clamp(d / (la * lb), -1, 1))) : NaN;
+    return [
+      { label: 'a · b', value: d, digits: 3 }, { label: '|a|', value: la, digits: 3 }, { label: '|b|', value: lb, digits: 3 },
+      { label: 'Angle θ between a and b', value: th, unit: '°', digits: 2 },
+      { label: 'a × b', value: `(${fmt(X3[0], 2)}, ${fmt(X3[1], 2)}, ${fmt(X3[2], 2)})` },
+      { label: '|a × b| = parallelogram area', value: lx, digits: 3 },
+      { label: 'Scalar projection of a on b', value: lb > 1e-9 ? d / lb : NaN, digits: 3 },
+      { label: 'Relationship', value: lx < 1e-9 ? 'parallel (a × b = 0)' : Math.abs(d) < 1e-9 ? 'perpendicular (a · b = 0)' : 'oblique' },
+      { label: 'Check: (a×b)·a and (a×b)·b', value: `${fmt(dot3(X3, A), 6)}, ${fmt(dot3(X3, B), 6)}` },
+    ];
+  },
+  equations() {
+    return ['\\vec a\\cdot\\vec b=a_xb_x+a_yb_y+a_zb_z=|\\vec a||\\vec b|\\cos\\theta', '\\vec a\\times\\vec b=(a_yb_z-a_zb_y,\\ a_zb_x-a_xb_z,\\ a_xb_y-a_yb_x)', '|\\vec a\\times\\vec b|=|\\vec a||\\vec b|\\sin\\theta'];
+  },
 });

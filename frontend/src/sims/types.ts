@@ -137,7 +137,7 @@ export interface SimDef<S> {
 }
 
 /** Keeps the registry simple: every simulation has its own state type. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export type AnySim = SimDef<any>;
 
 export function defineSim<S>(d: SimDef<S>): AnySim {

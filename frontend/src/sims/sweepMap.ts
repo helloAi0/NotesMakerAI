@@ -42,6 +42,7 @@ export const SWEEP: Record<string, string> = {
   "riemann-sums": "n",
   "tangent-limit": "h",
   "ftc-area-function": "select:fn",
+  "vectors-3d-dot-cross": "va",
   "single-slit": "lam",
   "beer": "wl",
   "ug-smith-chart": "d",
@@ -53,6 +54,5 @@ export const SWEEP: Record<string, string> = {
   "black_scholes_greeks": "S",
   "nash_equilibrium_matrix_games": "p",
   "cmos_inverter_vtc_delay": "vdd",
-  "nmr_ir_spectrum_interpretation": "mhz",
-  "vectors-3d-dot-cross": "az0"
+  "nmr_ir_spectrum_interpretation": "mhz"
 };

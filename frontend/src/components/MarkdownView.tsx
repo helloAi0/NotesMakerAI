@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 const md: any = {
   h1: ({ node: _n, ...p }: any) => <h2 className="text-base font-bold text-slate-900 mt-4 mb-2" {...p} />,
   h2: ({ node: _n, ...p }: any) => <h2 className="text-base font-bold text-slate-900 mt-4 mb-2" {...p} />,

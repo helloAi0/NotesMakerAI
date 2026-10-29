@@ -77,7 +77,7 @@ export const motiongraphs = defineSim<MgS>({
     ];
     defs.forEach((d, i) => {
       const pad = (d.hi - d.lo) * 0.12 || 1;
-      const m = plot(c, rect(i), [0, tmax], [d.lo - pad, d.hi + pad], { title: wide || true ? d.title : undefined, xlabel: wide ? 'time (s)' : undefined, zeroAxis: true });
+      const m = plot(c, rect(i), [0, tmax], [d.lo - pad, d.hi + pad], { title: d.title, xlabel: wide ? 'time (s)' : undefined, zeroAxis: true });
       const full: [number, number][] = [], part: [number, number][] = [];
       for (let k = 0; k <= 120; k++) { const t = (tmax * k) / 120, y = d.f(motion(v, Math.min(t, tmax))); full.push([m.X(t), m.Y(y)]); if (t <= tc) part.push([m.X(t), m.Y(y)]); }
       polyline(c, full, 'rgba(148,163,184,0.35)', 1.5);

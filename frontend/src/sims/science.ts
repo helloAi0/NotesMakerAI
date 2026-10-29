@@ -268,6 +268,7 @@ export const selection = defineSim<NsS>({
     { kind: 'number', id: 'mut', label: 'Mutation size', min: 0, max: 0.2, step: 0.005, value: 0.04, digits: 3 },
     { kind: 'number', id: 'rate', label: 'Generations per second', min: 0.3, max: 4, step: 0.1, value: 1.2, digits: 1 },
   ],
+  equations: (st) => [String.raw`R=h^{2}S\qquad \bar z_{t+1}=\bar z_t+R`, String.raw`P(\text{eaten})\propto \text{predation}\cdot(0.08+1.5\,|z-z_{bg}|)\qquad \text{generation }${st.gen}`],
   actions: [{ id: 'flip', label: 'Flip the environment' }],
   previewSeconds: 6,
   init(v) { const pop = Array.from({ length: 60 }, () => clamp(0.5 + gauss() * 0.22, 0, 1)); return { pop, gen: 0, clock: 0, hist: [], mean: [pop.reduce((a, b) => a + b, 0) / 60], bg: num(v, 'bg'), eaten: 0 }; },

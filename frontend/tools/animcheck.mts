@@ -21,3 +21,18 @@ for (const sim of sims) {
   if (a === b && a === mid) still.push(`${sim.id}  [${sim.subject}]`);
 }
 console.log(`${sims.length} sims; ${still.length} look identical after 3 s of Play:`); console.log(still.join('\n'));
+
+// ---- does the Play auto-sweep actually change the picture? (min vs max of the swept control)
+import { SWEEP } from '../src/sims/sweepMap.ts';
+const dead: string[] = []; let checked = 0;
+for (const sim of sims) {
+  const spec = (sim as any).sweep ?? SWEEP[sim.id]; if (!spec) continue; checked++;
+  const base = defaultsOf(sim.params); const draw = (v: any) => { const s = sim.init(v); const dt = sim.dt ?? 1 / 240; for (let i = 0; i < 20; i++) sim.step(s, v, dt); sig = ''; sim.draw(ctx, s, v, 700, 440); return sig; };
+  let A = '', B = '';
+  if (typeof spec === 'string' && spec.startsWith('toggles:')) { const ids = spec.slice(8).split(','); A = draw({ ...base, ...Object.fromEntries(ids.map(i => [i, false])) }); B = draw({ ...base, ...Object.fromEntries(ids.map(i => [i, true])) }); }
+  else if (typeof spec === 'string' && spec.startsWith('select:')) { const p: any = sim.params.find((q: any) => q.id === spec.slice(7)); const o = p.options; A = draw({ ...base, [p.id]: o[0].value }); B = draw({ ...base, [p.id]: o[o.length - 1].value }); }
+  else if (typeof spec === 'string' && spec.startsWith('action:')) continue;
+  else { const id = typeof spec === 'string' ? spec : (spec as any).param; const p: any = sim.params.find((q: any) => q.id === id); if (!p) { dead.push(`${sim.id}: swept param '${id}' not found`); continue; } A = draw({ ...base, [id]: p.min }); B = draw({ ...base, [id]: p.min + (p.max - p.min) * 0.3 }); }
+  if (A === B) dead.push(`${sim.id}: sweeping ${JSON.stringify(spec)} changes nothing`);
+}
+console.log(`sweep check: ${checked} sweepable sims, ${dead.length} ineffective`); console.log(dead.join('\n'));

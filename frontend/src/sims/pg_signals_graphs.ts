@@ -77,7 +77,7 @@ export const firDesign = defineSim<{ t: number }>({
     const sinc = (x: number) => (Math.abs(x) < 1e-9 ? 1 : Math.sin(Math.PI * x) / (Math.PI * x));
     const lpf = (f: number, n: number) => 2 * f * sinc(2 * f * n);
     const hh: number[] = [];
-    for (let n = 0; n <= M; n++) { const m = n - M / 2; let r = type === 'lp' ? lpf(fc, m) : type === 'hp' ? (Math.abs(m) < 1e-9 ? 1 : 0) - lpf(fc, m) : lpf(Math.min(0.49, fc + bw / 2), m) - lpf(Math.max(0.005, fc - bw / 2), m); hh.push(r * WIN(n, M, str(v, 'win'))); }
+    for (let n = 0; n <= M; n++) { const m = n - M / 2; const r = type === 'lp' ? lpf(fc, m) : type === 'hp' ? (Math.abs(m) < 1e-9 ? 1 : 0) - lpf(fc, m) : lpf(Math.min(0.49, fc + bw / 2), m) - lpf(Math.max(0.005, fc - bw / 2), m); hh.push(r * WIN(n, M, str(v, 'win'))); }
     const A = { x: 8, y: 8, w: w - 16, h: h * 0.38 }, B = { x: 8, y: A.y + A.h + 8, w: w - 16, h: h - A.h - 32 };
     const mh = Math.max(0.1, ...hh.map(Math.abs)) * 1.1, m1 = plot(c, A, [0, M], [-mh, mh], { title: 'impulse response h[n]', zeroAxis: true });
     hh.forEach((val, n) => { line(c, m1.X(n), m1.Y(0), m1.X(n), m1.Y(val), C.cyan, 1.5); circle(c, m1.X(n), m1.Y(val), 2.5, C.cyan); });

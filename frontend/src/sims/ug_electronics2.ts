@@ -82,7 +82,7 @@ function loopGain(sys: string, K: number, p1: number, p2: number, Td: number, w:
   let L = jw(K, 0);
   if (sys === 'type1') L = div(L, mul(jw(0, w), mul(jw(1, w / p1), jw(1, w / p2))));
   else if (sys === 'type0') L = div(L, mul(jw(1, w / p1), mul(jw(1, w / p2), jw(1, w / (p2 * 3)))));
-  else L = div(L, mul(jw(0, w), mul(jw(1, w / p1), jw(1, w / p2)))), L = mul(L, jw(1, w / (p1 * 0.5))); // type1 + lead zero
+  else { L = div(L, mul(jw(0, w), mul(jw(1, w / p1), jw(1, w / p2)))); L = mul(L, jw(1, w / (p1 * 0.5))); } // type1 + lead zero
   const dly = { re: Math.cos(w * Td), im: -Math.sin(w * Td) }; L = mul(L, dly);
   return [Math.hypot(L.re, L.im), Math.atan2(L.im, L.re)];
 }

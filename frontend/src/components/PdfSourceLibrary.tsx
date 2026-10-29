@@ -629,7 +629,7 @@ export default function PdfSourceLibrary() {
     setDocuments(prev => { const live = prev.filter(d => d.status !== 'Ready'); return [...live, ...stored.map(d => ({ ...d, status: 'Ready' as const, uploadDate: new Date(d.uploadDate).toLocaleDateString() }))]; });
     if (!loaded.current) { loaded.current = true; }
   };
-  useEffect(() => { void reloadLib(); const h = () => { void reloadLib(); }; window.addEventListener('nm:library', h); return () => window.removeEventListener('nm:library', h); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void reloadLib(); const h = () => { void reloadLib(); }; window.addEventListener('nm:library', h); return () => window.removeEventListener('nm:library', h); }, []);  
   useEffect(() => { if (!selectedDocId && documents.length) { const first = documents.find(d => d.status === 'Ready'); if (first) setSelectedDocId(first.id); } }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const open = (e: Event) => { const id = (e as CustomEvent<{ id: string }>).detail?.id; if (id) { setSelectedDocId(id); setFolderFilter('__all'); } };
