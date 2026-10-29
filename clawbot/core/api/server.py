@@ -21,6 +21,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from collections import OrderedDict
 from contextlib import asynccontextmanager
@@ -39,6 +40,7 @@ from core.memory.preferences import PreferenceMemory
 from core.memory.vector_store import SentenceTransformerEmbedder, VectorStore
 
 log = logging.getLogger("clawbot.api")
+LOCAL_ORIGIN = re.compile(r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$")
 MAX_FRAME_BYTES = 256 * 1024
 MAX_QUESTION_CHARS = 4000
 
@@ -52,9 +54,10 @@ class Settings:
     embed_model: str = field(default_factory=lambda: os.getenv("CLAWBOT_EMBED_MODEL", "BAAI/bge-large-en-v1.5"))
     data_dir: str = field(default_factory=lambda: os.getenv("CLAWBOT_DATA_DIR", "./data"))
     token: str | None = field(default_factory=lambda: os.getenv("CLAWBOT_TOKEN") or None)
-    origins: list[str] = field(default_factory=lambda: [o for o in os.getenv(
-        "CLAWBOT_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o])
+    origins: list[str] = field(default_factory=lambda: [o.strip() for o in os.getenv("CLAWBOT_ORIGINS", "").split(",") if o.strip()])
+    allow_local_origins: bool = True      # any http(s)://localhost|127.0.0.1[:port] (Vite may pick any free port)
     max_runs: int = field(default_factory=lambda: int(os.getenv("CLAWBOT_MAX_RUNS", "2")))
+    allow_private_hosts: bool = field(default_factory=lambda: os.getenv("CLAWBOT_ALLOW_PRIVATE_HOSTS", "") in ("1", "true", "yes"))
     default_mode: Literal["online", "offline"] = "online"
 
 
@@ -113,7 +116,7 @@ def create_app(settings: Settings | None = None, *, llm: InferenceClient | None 
         vs = store or VectorStore(Path(cfg.data_dir) / "chroma", embedder=SentenceTransformerEmbedder(cfg.embed_model))
         browser: WebIngestor | None = web
         if browser is None:
-            browser = StealthBrowser(BrowserConfig())      # Chromium launches lazily on first web fetch
+            browser = StealthBrowser(BrowserConfig(allow_private_hosts=cfg.allow_private_hosts))      # Chromium launches lazily on first web fetch
             owned.append(browser)
         agent = Agent(AgentDeps(client, vs, browser, agent_config or AgentConfig()))
         app.state.llm, app.state.store, app.state.web, app.state.agent = client, vs, browser, agent
@@ -132,7 +135,13 @@ def create_app(settings: Settings | None = None, *, llm: InferenceClient | None 
                 await client.close()
 
     app = FastAPI(title="ClawBot Core", version="1.0.0", lifespan=lifespan)
-    app.add_middleware(CORSMiddleware, allow_origins=cfg.origins, allow_methods=["GET", "POST", "DELETE"],
+    def _origin_ok(origin: str | None) -> bool:
+        if not origin:
+            return True                      # non-browser client (curl, scripts, tests)
+        return "*" in cfg.origins or origin in cfg.origins or (cfg.allow_local_origins and LOCAL_ORIGIN.match(origin) is not None)
+
+    app.add_middleware(CORSMiddleware, allow_origins=cfg.origins, allow_origin_regex=LOCAL_ORIGIN.pattern if cfg.allow_local_origins else None,
+                       allow_methods=["GET", "POST", "DELETE"],
                        allow_headers=["Authorization", "Content-Type"], allow_credentials=False)
 
     # ---- auth
@@ -144,6 +153,25 @@ def create_app(settings: Settings | None = None, *, llm: InferenceClient | None 
         if not _authorised(tok):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "missing or invalid bearer token",
                                 headers={"WWW-Authenticate": "Bearer"})
+
+    preflight_cache: dict[str, float] = {}
+
+    async def preflight() -> str | None:
+        """Fail fast with an actionable message instead of retrying a dead/misconfigured LLM server for ~30 s."""
+        if time.monotonic() - preflight_cache.get("ok", -1e9) < 15:
+            return None
+        c = app.state.llm.config
+        try:
+            models = await app.state.llm.list_models()
+        except LLMError:
+            hint = "ollama serve" if c.backend == "ollama" else "your vLLM server"
+            return f"Cannot reach the {c.backend} server at {c.base_url}. Start it ({hint}) or set CLAWBOT_LLM_URL."
+        if c.model not in models and f"{c.model}:latest" not in models:
+            have = ", ".join(models[:8]) or "none"
+            fix = f"ollama pull {c.model}" if c.backend == "ollama" else "serve that model"
+            return f"Model '{c.model}' is not available on the {c.backend} server (installed: {have}). Run `{fix}` or set CLAWBOT_MODEL."
+        preflight_cache["ok"] = time.monotonic()
+        return None
 
     # ---- REST
     @app.get("/health")
@@ -202,8 +230,7 @@ def create_app(settings: Settings | None = None, *, llm: InferenceClient | None 
         if not _authorised(token):
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="unauthorised")
             return
-        origin = ws.headers.get("origin")
-        if origin and cfg.origins and origin not in cfg.origins and "*" not in cfg.origins:
+        if not _origin_ok(ws.headers.get("origin")):
             await ws.close(code=status.WS_1008_POLICY_VIOLATION, reason="origin not allowed")
             return
         await ws.accept()
@@ -225,6 +252,10 @@ def create_app(settings: Settings | None = None, *, llm: InferenceClient | None 
         async def run_agent(question: str, history: list[dict[str, str]], run_mode: str, run_id: str | None) -> None:
             async with app.state.run_slots:
                 rid = run_id
+                problem = await preflight()
+                if problem:
+                    await send({"event": "error", "code": "llm_unavailable", "message": problem, "run_id": rid})
+                    return
                 try:
                     async for ev in app.state.agent.stream(question, history=history, mode=run_mode, run_id=run_id):
                         rid = ev.get("run_id", rid)
@@ -299,8 +330,13 @@ def create_app(settings: Settings | None = None, *, llm: InferenceClient | None 
     return app
 
 
-def _default_app() -> FastAPI:
-    return create_app()
+def __getattr__(name: str) -> Any:        # `uvicorn core.api.server:app` builds the default app on demand
+    if name == "app":
+        global _APP
+        if _APP is None:
+            _APP = create_app()
+        return _APP
+    raise AttributeError(name)
 
 
-app = _default_app()
+_APP: FastAPI | None = None

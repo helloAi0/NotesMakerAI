@@ -49,7 +49,7 @@ class FakeWeb:
 
 async def handler(req: httpx.Request) -> httpx.Response:
     if req.method == "GET":
-        return httpx.Response(200, json={"models": [{"name": "fake"}]})
+        return httpx.Response(200, json={"models": [{"name": "llama3.1:8b"}]})
     await asyncio.sleep(DELAY)
     body = json.loads(req.content)
     sys_prompt, user = body["messages"][0]["content"], body["messages"][-1]["content"]

@@ -402,9 +402,8 @@ class Agent:
         if state.get("passed"):
             return {"final": draft, "_note": "accepted"}
         if draft:
-            note = ("\n\n---\n*Note: this answer did not fully pass the automated quality review"
-                    + (f" ({state['critique'].get('issues', [''])[0]})" if state.get("critique", {}).get("issues") else "")
-                    + ".*")
+            issues = state.get("critique", {}).get("issues") or []
+            note = "\n\n[Note: this answer did not fully pass the automated quality review" + (f" ({issues[0]})" if issues else "") + ".]"
             return {"final": draft + note, "_note": "best effort (review not passed)"}
         return {"final": "I could not produce an answer: " + (state.get("error") or "the model returned nothing."),
                 "_note": "failed"}

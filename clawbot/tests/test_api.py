@@ -22,7 +22,7 @@ def build(tmp_path, script=None, token=None, **kw):
                           sleep=nosleep, rng=random.Random(0))
     store = VectorStore(tmp_path / "db", embedder=HashEmbedder(), chunk_size=300, chunk_overlap=40)
     store.add_text("The Rust borrow checker enforces memory safety without a garbage collector.", source="notes/rust")
-    s = Settings(token=token, origins=["http://localhost:5173"], data_dir=str(tmp_path))
+    s = Settings(token=token, data_dir=str(tmp_path))
     app = create_app(s, llm=llm, store=store, web=kw.pop("web", FakeWeb()), agent_config=AgentConfig(**kw))
     return app, script, store
 
@@ -83,13 +83,48 @@ def test_offline_toggle_blocks_web_online_uses_it(tmp_path):
         assert web.calls and r2["route"] == "web"
 
 
+def test_preflight_gives_actionable_errors(tmp_path):
+    def mk(handler):
+        llm = InferenceClient(LLMConfig(base_url="http://local", max_retries=0), transport=httpx.MockTransport(handler), sleep=nosleep)
+        store = VectorStore(tmp_path / "pf", embedder=HashEmbedder())
+        return create_app(Settings(), llm=llm, store=store, web=FakeWeb())
+
+    def down(req):
+        raise httpx.ConnectError("refused")
+    with TestClient(mk(down)) as c, c.websocket_connect("/ws") as ws:
+        ws.receive_text(); ws.send_text(json.dumps({"type": "ask", "question": Q}))
+        ev = collect(ws)[-1]
+        assert ev["code"] == "llm_unavailable" and "ollama serve" in ev["message"]
+
+    def wrong_model(req):
+        return httpx.Response(200, json={"models": [{"name": "mistral:7b"}]})
+    with TestClient(mk(wrong_model)) as c, c.websocket_connect("/ws") as ws:
+        ws.receive_text(); ws.send_text(json.dumps({"type": "ask", "question": Q}))
+        ev = collect(ws)[-1]
+        assert ev["code"] == "llm_unavailable" and "ollama pull llama3.1:8b" in ev["message"] and "mistral:7b" in ev["message"]
+
+
+def test_any_localhost_port_allowed_but_not_foreign_origins(tmp_path):
+    app, *_ = build(tmp_path)
+    with TestClient(app) as c:
+        with c.websocket_connect("/ws", headers={"origin": "http://localhost:5199"}) as ws:
+            assert json.loads(ws.receive_text())["event"] == "ready"
+        with pytest.raises(Exception):
+            with c.websocket_connect("/ws", headers={"origin": "https://evil.example"}):
+                pass
+        r = c.get("/health", headers={"origin": "http://127.0.0.1:5174"})
+        assert r.headers.get("access-control-allow-origin") == "http://127.0.0.1:5174"
+        r = c.get("/health", headers={"origin": "https://evil.example"})
+        assert "access-control-allow-origin" not in r.headers
+
+
 def test_llm_failure_is_reported_not_fatal(tmp_path):
     def down(req):
         raise httpx.ConnectError("refused")
     app, *_ = build(tmp_path)
     app_llm = InferenceClient(LLMConfig(base_url="http://local", max_retries=0), transport=httpx.MockTransport(down), sleep=nosleep)
     store = VectorStore(tmp_path / "db2", embedder=HashEmbedder())
-    app = create_app(Settings(origins=["http://localhost:5173"]), llm=app_llm, store=store, web=FakeWeb())
+    app = create_app(Settings(), llm=app_llm, store=store, web=FakeWeb())
     with TestClient(app) as c, c.websocket_connect("/ws") as ws:
         ws.receive_text()
         ws.send_text(json.dumps({"type": "ask", "question": Q}))
@@ -104,6 +139,8 @@ def test_cancel_stops_run(tmp_path):
     import time
 
     def slow(req):
+        if req.method == "GET":
+            return httpx.Response(200, json={"models": [{"name": "llama3.1:8b"}]})
         body = json.loads(req.content)
         if "planning module" in body["messages"][0]["content"]:
             time.sleep(1.5)
@@ -111,7 +148,7 @@ def test_cancel_stops_run(tmp_path):
         return httpx.Response(200, content=b'{"message":{"content":"x"},"done":true}')
     llm = InferenceClient(LLMConfig(base_url="http://local", max_retries=0), transport=httpx.MockTransport(slow), sleep=nosleep)
     store = VectorStore(tmp_path / "db", embedder=HashEmbedder())
-    app = create_app(Settings(origins=["http://localhost:5173"]), llm=llm, store=store, web=FakeWeb())
+    app = create_app(Settings(), llm=llm, store=store, web=FakeWeb())
     with TestClient(app) as c, c.websocket_connect("/ws") as ws:
         ws.receive_text()
         ws.send_text(json.dumps({"type": "ask", "question": Q}))

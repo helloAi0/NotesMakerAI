@@ -25,7 +25,7 @@ Add your own AI key inside the app's settings. Never commit keys.
 Adding a simulation: see `frontend/tools/SIM_AUTHORING.md`. Export `defineSim({...})` from a new file in `src/sims/`; it is registered automatically.
 
 ## Click-to-speak, dictation and handwriting (all offline)
-- **Click any word** in the notes (typed, dictated or AI-generated) and reading starts at exactly that word; **highlight** text to read from the highlighted start; **click inside the Edit box** to read from the caret. Toggle: *Voice → Click-to-speak*.
+- **Click any word** in the notes (Read mode; typed, dictated or AI-generated) and reading starts at exactly that word; **highlight** text to read from the highlighted start. Clicking beside, below or between words does nothing, and the typing box never speaks. Toggle: *Voice → Click-to-speak*.
 - **Handwriting:** Draw tab → *Recognise handwriting* (local tesseract.js engine, files copied to `frontend/public/ocr` by `npm install`/`npm run dev`). Then in Read mode click any handwritten word to hear from there, or *To typed text*. Accuracy is best for neat print-style letters; cursive is unreliable.
 - **Dictation** streams words into the editor live and applies spoken formatting ("new line", "bullet", "heading …", "full stop").
 
@@ -51,3 +51,7 @@ Tests: `npx tsx tools/friday.mts`, `npx tsx tools/intents.mts`, and with `npx vi
 - **Play** auto-sweeps one parameter on static simulations so something always moves.
 - New sims: Black–Scholes + Greeks, bullwhip, Nash equilibrium, DNA alignment, particle-filter localisation with LiDAR, planar quadcopter, 6-DOF arm FK/IK, Red-Black tree, Q-learning, Raft, ZK 3-colouring demo, traffic anomaly detector, CMOS inverter, Carnot cycle, NMR/IR, Ising, N-body, lattice-Boltzmann flow.
 - Tests: `npx tsx tools/{intents,fmt,friday,logic_cs,logic_sci,fuzz}.mts`, then e2e scripts against `vite preview`.
+
+
+## ClawBot Core (self-hosted agent with live dashboard)
+See `clawbot/README.md` for setup and commands. In the app: sidebar → **ClawBot Core**.

@@ -203,3 +203,11 @@ def test_search_result_decoding():
     assert d("https://duckduckgo.com/y.js?ad=1") is None
     assert d("https://example.org/x") == "https://example.org/x"
     assert d("javascript:alert(1)") is None
+
+
+async def test_close_without_launch_and_double_close():
+    b = StealthBrowser(BrowserConfig())
+    await b.close()
+    await b.close()
+    with pytest.raises(Exception):
+        await b.fetch("https://93.184.216.34/")

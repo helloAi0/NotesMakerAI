@@ -145,7 +145,8 @@ class SentenceTransformerEmbedder:
                     raise MemoryError_("sentence-transformers is not installed: pip install sentence-transformers") from e
                 self._model = SentenceTransformer(self.name, device=self.device, cache_folder=self.cache_folder,
                                                   local_files_only=self.local_files_only)
-                self._dim = int(self._model.get_sentence_embedding_dimension())
+                dim_fn = getattr(self._model, "get_embedding_dimension", None) or self._model.get_sentence_embedding_dimension
+                self._dim = int(dim_fn())
                 log.info("loaded embedding model %s (dim=%d)", self.name, self._dim)
             return self._model
 

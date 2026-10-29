@@ -26,7 +26,7 @@ class Script:
 
     def __call__(self, req):
         if req.method == "GET":
-            return httpx.Response(200, json={"models": [{"name": "fake"}]})
+            return httpx.Response(200, json={"models": [{"name": "llama3.1:8b"}]})
         body = json.loads(req.content)
         sys = body["messages"][0]["content"]
         if "planning module" in sys:
