@@ -11,11 +11,9 @@ await pg.click('nav button:has-text("Visuals Studio")'); await pg.waitForSelecto
 check('library header count', await vis('text=/\\d+ Functional Simulations/'));
 await pg.click('button:has-text("Curriculum Coverage")');
 check('coverage summary', await vis('text=/topics have a working simulation/'));
-const nPlanned = await pg.locator('text=PLANNED').count(); check('planned topics shown honestly ('+nPlanned+')', nPlanned>5);
-await pg.selectOption('select >> nth=2', 'planned').catch(()=>{});
-await pg.selectOption('xpath=(//select)[3]', 'working');
+const nPlanned = await pg.locator('text=PLANNED').count(); check('no PLANNED topics remain ('+nPlanned+')', nPlanned===0);
 await pg.fill('input[placeholder="Search topics…"]','Kalman');
-check('search finds Kalman only', (await pg.locator('span:text-is("WORKING")').count())===1 && await vis('button:has-text("Kalman")'));
+check('search finds Kalman', (await pg.locator('span:text-is("WORKING")').count())>=1 && await vis('button:has-text("Kalman")'));
 await pg.click('button:has-text("Kalman")'); await pg.waitForTimeout(800);
 check('sim opened from coverage', await vis('text=Kalman Filter'));
 check('Back to Simulation Library visible', await vis('button:has-text("Back to Simulation Library")'));

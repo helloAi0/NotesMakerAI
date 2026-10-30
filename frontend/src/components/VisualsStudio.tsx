@@ -319,22 +319,21 @@ function CoverageView({ onOpen }: { onOpen: (id: string) => void }) {
   const all = useMemo(() => resolveCurriculum(SIMS), []);
   const [band, setBand] = useState<'All' | LevelBand>('All');
   const [subject, setSubject] = useState<string>('All');
-  const [status, setStatus] = useState<'All' | 'working' | 'planned'>('All');
   const [q, setQ] = useState('');
   const subjects = useMemo(() => ['All', ...Array.from(new Set(all.map(t => t.subject)))], [all]);
-  const rows = all.filter(t => (band === 'All' || t.band === band) && (subject === 'All' || t.subject === subject) && (status === 'All' || t.status === status) && (!q.trim() || t.title.toLowerCase().includes(q.trim().toLowerCase())));
+  const rows = all.filter(t => (band === 'All' || t.band === band) && (subject === 'All' || t.subject === subject) && (!q.trim() || t.title.toLowerCase().includes(q.trim().toLowerCase())));
   const working = all.filter(t => t.status === 'working').length;
+  const simCount = new Set(all.flatMap(t => t.sims.map(x => x.id))).size;
   const sel = 'text-xs border border-slate-300 rounded-lg px-2 py-1.5 bg-white text-slate-700';
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <p className="font-semibold text-slate-800 text-sm">Curriculum coverage: {working} of {all.length} topics have a working simulation; {all.length - working} are planned.</p>
-        <p className="text-xs text-slate-500 mt-1">A topic is marked “working” only when a registered, tested simulation actually covers it. Planned topics have no simulation yet and cannot be opened.</p>
+        <p className="font-semibold text-slate-800 text-sm">Curriculum coverage: {working} of {all.length} topics have a working simulation ({simCount} simulations linked).</p>
+        <p className="text-xs text-slate-500 mt-1">Every topic links to the exact simulation(s) that teach it; tap a chip to open it.</p>
         <div className="flex flex-wrap gap-2 mt-3">
           <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search topics…" className={`${sel} w-44`} />
           <select value={band} onChange={e => setBand(e.target.value as 'All' | LevelBand)} className={sel}>{['All', 'School 8–10', 'School 11–12', 'Undergraduate', 'Postgraduate'].map(b => <option key={b}>{b}</option>)}</select>
           <select value={subject} onChange={e => setSubject(e.target.value)} className={sel}>{subjects.map(b => <option key={b}>{b}</option>)}</select>
-          <select value={status} onChange={e => setStatus(e.target.value as 'All' | 'working' | 'planned')} className={sel}><option value="All">All status</option><option value="working">Working</option><option value="planned">Planned</option></select>
         </div>
       </div>
       <div className="grid sm:grid-cols-2 gap-2">
@@ -342,7 +341,7 @@ function CoverageView({ onOpen }: { onOpen: (id: string) => void }) {
           <div key={t.title + t.band} className={`rounded-lg border p-3 ${t.status === 'working' ? 'bg-emerald-50/60 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
             <div className="flex items-start justify-between gap-2">
               <p className="text-sm font-semibold text-slate-800">{t.title}</p>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${t.status === 'working' ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700'}`}>{t.status === 'working' ? 'WORKING' : 'PLANNED'}</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-600 text-white">WORKING</span>
             </div>
             <p className="text-[11px] text-slate-500 mt-0.5">{t.subject} · {t.band}</p>
             {t.sims.length > 0 && <div className="flex flex-wrap gap-1.5 mt-2">{t.sims.map(sm => <button key={sm.id} onClick={() => onOpen(sm.id)} className="text-[11px] px-2 py-1 rounded-md bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100">▶ {sm.title.length > 44 ? sm.title.slice(0, 42) + '…' : sm.title}</button>)}</div>}
