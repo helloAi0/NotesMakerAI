@@ -206,7 +206,7 @@ const STT_ERRORS: Record<string, string> = {
   'service-not-allowed': 'Speech recognition is blocked for this page. You can type instead.',
   'no-speech': 'No speech was heard. Try again, closer to the microphone.',
   'audio-capture': 'No microphone was found.',
-  network: 'Speech recognition needs a network connection in this browser.',
+  network: 'Speech recognition could not reach its speech service. Chrome and Edge include one; Opera, Brave and Firefox do not. Open this app in Chrome or Edge, or type instead.',
   'language-not-supported': 'That language is not supported for dictation here.',
   aborted: '',
 };
@@ -219,6 +219,8 @@ export class SpeechToTextController {
   private rec: SpeechRecognitionLike | null = null;
   private state: SttState = 'idle';
   private wantOn = false;
+  private pendingInterim = ''; // last partial phrase; delivered as final if the browser ends without finalising it
+  private quickEnds = 0; private startedAt = 0;
   private cb: SttCallbacks;
   lang = 'en-US';
   continuous = true;
@@ -237,26 +239,31 @@ export class SpeechToTextController {
     this.setState('starting');
     const rec = new C();
     rec.lang = this.lang; rec.continuous = this.continuous; rec.interimResults = true; rec.maxAlternatives = 3;
-    rec.onstart = () => this.setState('listening');
+    rec.onstart = () => { this.startedAt = Date.now(); this.setState('listening'); };
     rec.onresult = e => {
-      let interim = '';
+      let interim = ''; let gotFinal = false;
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
         if (r.isFinal) {
           const alts: string[] = [];
           for (let a = 0; a < r.length; a++) alts.push(r[a].transcript.trim());
-          this.cb.onFinal?.(alts[0] ?? '', alts);
+          gotFinal = true; this.quickEnds = 0; this.cb.onFinal?.(alts[0] ?? '', alts);
         } else interim += r[0].transcript;
       }
+      this.pendingInterim = interim.trim() ? interim.trim() : (gotFinal ? '' : this.pendingInterim);
       this.cb.onInterim?.(interim);
     };
     rec.onerror = e => {
       const msg = STT_ERRORS[e.error] ?? `Speech recognition error (${e.error}).`;
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture' || e.error === 'language-not-supported') this.wantOn = false;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture' || e.error === 'language-not-supported' || e.error === 'network') this.wantOn = false;
       if (msg) this.cb.onError?.(msg, e.error);
     };
     rec.onend = () => {
       this.cb.onInterim?.('');
+      // The browser ended the session while a phrase was still partial (always happens on a manual stop): keep what was heard.
+      if (this.pendingInterim) { const t = this.pendingInterim; this.pendingInterim = ''; this.quickEnds = 0; this.cb.onFinal?.(t, [t]); }
+      // Sessions that keep ending at once without hearing anything mean recognition does not work here; stop instead of showing "listening" forever.
+      if (this.wantOn && Date.now() - this.startedAt < 1500) { this.quickEnds++; if (this.quickEnds >= 3) { this.wantOn = false; this.quickEnds = 0; this.cb.onError?.('The microphone session keeps closing without hearing anything. Check the microphone permission and the input device, and use Chrome or Edge for speech recognition.', 'no-audio'); } } else if (this.wantOn) this.quickEnds = 0;
       // Browsers end continuous sessions on their own after silence; restart while the user still wants dictation.
       if (this.wantOn && this.state !== 'paused') { try { rec.start(); return; } catch { /* fall through */ } }
       this.rec = null;
@@ -269,9 +276,9 @@ export class SpeechToTextController {
   pause() { if (this.state === 'listening') { this.setState('paused'); this.wantOn = false; try { this.rec?.stop(); } catch { /* ignore */ } } }
   resume() { if (this.state === 'paused') { this.rec = null; this.state = 'idle'; this.start(); } }
   /** Stop; a phrase that was still being processed is still delivered. */
-  stop() { this.wantOn = false; try { this.rec?.stop(); } catch { /* ignore */ } if (!this.rec) this.setState('idle'); }
+  stop() { this.wantOn = false; try { this.rec?.stop(); } catch { /* ignore */ } if (!this.rec) this.setState('idle'); else setTimeout(() => { if (this.rec && !this.wantOn) { /* the browser never fired onend */ const t = this.pendingInterim; this.pendingInterim = ''; try { this.rec?.abort(); } catch { /* ignore */ } this.rec = null; this.cb.onInterim?.(''); this.setState('idle'); if (t) this.cb.onFinal?.(t, [t]); } }, 2500); }
   /** Stop and throw away anything not yet delivered. */
-  cancel() { this.wantOn = false; try { this.rec?.abort(); } catch { /* ignore */ } this.rec = null; this.cb.onInterim?.(''); this.setState('idle'); }
+  cancel() { this.wantOn = false; this.pendingInterim = ''; try { this.rec?.abort(); } catch { /* ignore */ } this.rec = null; this.cb.onInterim?.(''); this.setState('idle'); }
 }
 
 /* ===== Backwards-compatible narration controller (DerivationViewer) ===== */

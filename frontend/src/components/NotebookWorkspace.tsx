@@ -155,6 +155,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     newHistory.push(newShapes);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
+    editOrder.current.push({ k: 'shape', page: currentPage }); redoOrder.current = [];
 
     if (autoSave) setTimeout(() => setSaveStatus('Saved'), 500);
   };
@@ -392,7 +393,31 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   };
 
   // ---- notes editing helpers ----
+  // Unified undo/redo for typed notes and shapes, in the order the edits were made (toolbar buttons and Ctrl+Z / Ctrl+Y).
+  const textHist = useRef<Record<number, { s: string[]; i: number; t: number }>>({});
+  const editOrder = useRef<{ k: 'text' | 'shape'; page: number }[]>([]); const redoOrder = useRef<{ k: 'text' | 'shape'; page: number }[]>([]);
+  const [, bumpHist] = useState(0); const applyingText = useRef(false);
+  const recordText = (page: number, before: string, val: string) => {
+    if (applyingText.current || before === val) return; const h = (textHist.current[page] ??= { s: [before], i: 0, t: 0 }); const now = Date.now();
+    h.s = h.s.slice(0, h.i + 1); const typing = now - h.t < 700 && Math.abs(val.length - before.length) < 3 && h.i > 0;
+    if (typing) h.s[h.i] = val; else { h.s.push(val); h.i++; editOrder.current.push({ k: 'text', page }); if (h.s.length > 300) { h.s.shift(); h.i--; } }
+    h.t = now; redoOrder.current = []; bumpHist(x => x + 1);
+  };
+  const undoAny = () => {
+    const e = editOrder.current.pop();
+    if (!e) { if (historyIndex > 0) undo(); return; }
+    if (e.k === 'shape') { if (historyIndex > 0) undo(); redoOrder.current.push(e); }
+    else { const h = textHist.current[e.page]; if (h && h.i > 0) { h.i--; applyingText.current = true; setNotesFor(e.page, h.s[h.i]); applyingText.current = false; caretRef.current = h.s[h.i].length; redoOrder.current.push(e); } }
+    bumpHist(x => x + 1);
+  };
+  const redoAny = () => {
+    const e = redoOrder.current.pop(); if (!e) { if (historyIndex < history.length - 1) redo(); return; }
+    if (e.k === 'shape') { if (historyIndex < history.length - 1) redo(); editOrder.current.push(e); }
+    else { const h = textHist.current[e.page]; if (h && h.i < h.s.length - 1) { h.i++; applyingText.current = true; setNotesFor(e.page, h.s[h.i]); applyingText.current = false; caretRef.current = h.s[h.i].length; editOrder.current.push(e); } }
+    bumpHist(x => x + 1);
+  };
   const setNotesFor = (page: number, val: string) => {
+    recordText(page, textRef.current[page] || '', val);
     const next = { ...textRef.current, [page]: val };
     textRef.current = next;
     setPageTypedText(next);
@@ -609,8 +634,8 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
             AutoSave
           </label>
           <div className="flex items-center gap-1 border-l border-slate-600 pl-2 md:pl-4">
-            <button onClick={undo} disabled={historyIndex <= 0} title="Undo shape change" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Undo2 className="w-3.5 h-3.5"/></button>
-            <button onClick={redo} disabled={historyIndex >= history.length - 1} title="Redo shape change" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Redo2 className="w-3.5 h-3.5"/></button>
+            <button onClick={undoAny} disabled={editOrder.current.length === 0 && historyIndex <= 0} aria-label="Undo" title="Undo (Ctrl+Z)" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Undo2 className="w-3.5 h-3.5"/></button>
+            <button onClick={redoAny} disabled={redoOrder.current.length === 0 && historyIndex >= history.length - 1} aria-label="Redo" title="Redo (Ctrl+Y)" className="p-1 hover:bg-slate-700 rounded disabled:opacity-50"><Redo2 className="w-3.5 h-3.5"/></button>
           </div>
         </div>
         <span className="font-semibold text-slate-300 truncate mx-4 hidden md:inline">{activeTitle}</span>
@@ -910,6 +935,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                       onSelect={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
                       onClick={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
                       onKeyUp={(e) => { caretRef.current = e.currentTarget.selectionStart; }}
+                      onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && !e.altKey) { const k = e.key.toLowerCase(); if (k === 'z' && !e.shiftKey) { e.preventDefault(); undoAny(); } else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redoAny(); } } }}
                       placeholder="Type notes here, or use the Voice tab to dictate. Math: $x^2$"
                       className="w-full text-slate-900 text-base font-sans p-3 bg-amber-50/30 border border-amber-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 resize-y leading-relaxed min-h-[140px]"
                     />
