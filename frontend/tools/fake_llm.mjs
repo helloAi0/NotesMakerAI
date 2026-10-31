@@ -6,6 +6,7 @@ http.createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end(); }
   if (req.url === '/api/tags') { res.writeHead(200, { ...cors, 'content-type': 'application/json' }); return res.end(JSON.stringify({ models: [{ name: 'tiny-test:1b' }, { name: 'llama3.1:8b-instruct' }] })); }
   if (req.url?.endsWith('/models')) { res.writeHead(200, { ...cors, 'content-type': 'application/json' }); return res.end(JSON.stringify({ data: [{ id: 'tiny-test:1b' }] })); }
+  if (req.url?.endsWith('/audio/transcriptions')) { let n = 0; req.on('data', c => (n += c.length)); req.on('end', () => { res.writeHead(200, { ...cors, 'content-type': 'application/json' }); res.end(JSON.stringify({ text: n > 2000 ? 'hello from transcription' : '' })); }); return; }
   if (req.url?.endsWith('/chat/completions')) { let body = ''; req.on('data', c => (body += c)); req.on('end', () => {
     const j = JSON.parse(body || '{}'); const text = JSON.stringify(j.messages ?? []); let out = 'MODEL-ANSWER: the energy is $E=mc^2$.';
     if (/planner of FRIDAY/.test(text)) out = JSON.stringify({ version: 1, goal: 'x', steps: [{ action: 'fs.mkdir', label: 'Create folder Planned', args: { name: 'Planned' } }, { action: 'fs.ls', label: 'List', args: {} }] });

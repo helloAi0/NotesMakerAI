@@ -7,7 +7,7 @@ export default function MicTest() {
   const [level, setLevel] = useState(0);
   const [msg, setMsg] = useState('');
   const stopRef = useRef<() => void>(() => {});
-  const [devices, setDevices] = useState<{ id: string; label: string }[]>([]); const [dev, setDev] = useState(''); const [used, setUsed] = useState(''); const [defLabel, setDefLabel] = useState('');
+  const [devices, setDevices] = useState<{ id: string; label: string }[]>([]); const [dev, setDev] = useState(() => { try { return localStorage.getItem('nm_mic_device') || ''; } catch { return ''; } }); const [used, setUsed] = useState(''); const [defLabel, setDefLabel] = useState('');
   const refreshDevices = async () => { try { const all = await navigator.mediaDevices.enumerateDevices(); setDevices(all.filter(d => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications').map((d, i) => ({ id: d.deviceId, label: d.label || `Microphone ${i + 1}` }))); setDefLabel(all.find(d => d.kind === 'audioinput' && d.deviceId === 'default')?.label.replace(/^Default - /, '') ?? ''); } catch { /* ignore */ } };
 
   useEffect(() => { if (typeof navigator !== 'undefined' && navigator.mediaDevices) queueMicrotask(() => { void refreshDevices(); }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -26,7 +26,7 @@ export default function MicTest() {
       return;
     }
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AC(); const an = ctx.createAnalyser(); an.fftSize = 512; ctx.createMediaStreamSource(stream).connect(an);
+    const ctx = new AC(); void ctx.resume(); const an = ctx.createAnalyser(); an.fftSize = 512; ctx.createMediaStreamSource(stream).connect(an);
     const buf = new Uint8Array(an.fftSize); let peak = 0; let raf = 0; const t0 = performance.now(); setState('live');
     const stop = (final: boolean) => { cancelAnimationFrame(raf); stream.getTracks().forEach(t => t.stop()); void ctx.close(); if (final) { setLevel(0); setState(peak > 0.05 ? 'ok' : 'quiet'); } };
     stopRef.current = () => stop(false);
@@ -37,7 +37,7 @@ export default function MicTest() {
 
   return (
     <div className="flex flex-col gap-1">
-      {devices.length > 0 && <select value={dev} onChange={e => setDev(e.target.value)} aria-label="Microphone to test" className="border rounded px-1.5 py-1 max-w-[250px] text-[11px]"><option value="">System default{defLabel ? ` (${defLabel})` : ''}</option>{devices.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}</select>}
+      {devices.length > 0 && <select value={dev} onChange={e => { setDev(e.target.value); try { if (e.target.value) localStorage.setItem('nm_mic_device', e.target.value); else localStorage.removeItem('nm_mic_device'); } catch { /* ignore */ } }} aria-label="Microphone to test" className="border rounded px-1.5 py-1 max-w-[250px] text-[11px]"><option value="">System default{defLabel ? ` (${defLabel})` : ''}</option>{devices.map(d => <option key={d.id} value={d.id}>{d.label}</option>)}</select>}
       <button onClick={run} disabled={state === 'asking' || state === 'live'} className="px-2 py-1.5 rounded bg-slate-100 border border-slate-300 font-semibold flex items-center gap-1 w-fit disabled:opacity-60"><Mic className="w-3.5 h-3.5" /> Test microphone</button>
       {state === 'live' && (<div className="w-40"><div className="h-2 rounded bg-slate-200 overflow-hidden"><div className="h-2 bg-emerald-500" style={{ width: `${Math.min(100, level * 250)}%` }} /></div><span className="text-[11px] text-slate-600">Speak now… (4 s)</span></div>)}
       {state === 'ok' && <span className="text-[11px] text-emerald-700">Microphone works: sound detected.</span>}

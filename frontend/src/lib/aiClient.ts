@@ -337,7 +337,7 @@ const noThinking = new Set<string>(); // models that rejected the thinking setti
 const GEMINI_FAST = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
 const GEMINI_QUALITY = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
 
-function geminiModels(cfg: AiConfig): string[] {
+export function geminiModels(cfg: AiConfig): string[] {
   if (cfg.model.trim()) return [cfg.model.trim()];
   return cfg.speed === 'fast' ? GEMINI_FAST : GEMINI_QUALITY;
 }
@@ -477,7 +477,7 @@ async function openRouterFreeModels(): Promise<string[]> {
   return openRouterFree;
 }
 
-function baseUrlOf(cfg: AiConfig): string {
+export function baseUrlOf(cfg: AiConfig): string {
   return (cfg.provider === 'custom' ? cfg.baseUrl : PROVIDERS[cfg.provider].baseUrl).trim().replace(/\/+$/, '');
 }
 

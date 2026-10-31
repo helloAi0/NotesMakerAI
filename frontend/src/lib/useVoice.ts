@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SpeechEngine, SpeechToTextController, type SpeechSegment, type SttState, type TtsState } from './speechUtils';
+import { CloudDictationController, canTranscribe } from './cloudDictation';
+import { llmConfig } from './friday';
 
 /** Text-to-speech state for a component. One engine per component, cleaned up on unmount. */
 export function useReader() {
@@ -46,27 +48,53 @@ export function useReader() {
   };
 }
 
-/** Dictation. The microphone is only opened when start() is called from a click. */
+export type DictationMode = 'auto' | 'browser' | 'cloud';
+const MODE_KEY = 'nm_dictation_engine';
+export const getDictationMode = (): DictationMode => { try { const v = localStorage.getItem(MODE_KEY); return v === 'browser' || v === 'cloud' ? v : 'auto'; } catch { return 'auto'; } };
+export const setDictationMode = (m: DictationMode) => { try { localStorage.setItem(MODE_KEY, m); } catch { /* ignore */ } };
+const FALLBACK_CODES = new Set(['network', 'service-not-allowed', 'no-sound', 'no-audio', 'unsupported', 'language-not-supported']);
+
+/**
+ * Dictation. The microphone is only opened when start() is called from a click.
+ * Two engines: the browser's own speech recognition, or AI transcription with the user's key (works in every browser and
+ * with the microphone chosen in "Test microphone"). In "auto" mode the second takes over when the first cannot hear anything.
+ */
 export function useDictation(onFinal: (text: string, alternatives: string[]) => void) {
   const [state, setState] = useState<SttState>('idle');
   const [interim, setInterim] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [signal, setSignal] = useState<'none' | 'audio' | 'sound' | 'speech'>('none');
   const [lang, setLangState] = useState('en-US');
-  const finalRef = useRef(onFinal);
-  finalRef.current = onFinal;
-  const ctl = useRef<SpeechToTextController | null>(null);
+  const [mode, setModeState] = useState<DictationMode>(getDictationMode());
+  const [engine, setEngine] = useState<'browser' | 'cloud'>('browser');
+  const finalRef = useRef(onFinal); finalRef.current = onFinal;
+  const modeRef = useRef(mode); modeRef.current = mode; const langRef = useRef(lang); langRef.current = lang;
+  const ctl = useRef<SpeechToTextController | null>(null); const cloud = useRef<CloudDictationController | null>(null);
   if (!ctl.current) ctl.current = new SpeechToTextController();
-  const c = ctl.current;
+  if (!cloud.current) cloud.current = new CloudDictationController(() => llmConfig());
+  const c = ctl.current, cc = cloud.current; const active = useRef<'browser' | 'cloud'>('browser');
+  const cloudOk = () => canTranscribe(llmConfig()).ok;
   useEffect(() => {
-    c.setCallbacks({ onState: s => { setState(s); if (s === 'idle') setSignal('none'); }, onSignal: setSignal, onInterim: setInterim, onFinal: (t, a) => finalRef.current(t, a), onError: m => setError(m) });
-    return () => c.cancel();
-  }, [c]);
+    const common = { onState: (s: SttState) => { setState(s); if (s === 'idle') setSignal('none'); }, onSignal: setSignal, onInterim: setInterim, onFinal: (t: string, a: string[]) => finalRef.current(t, a) };
+    cc.setCallbacks({ ...common, onError: m => setError(m) });
+    c.setCallbacks({ ...common, onError: (m, code) => {
+      if (modeRef.current === 'auto' && FALLBACK_CODES.has(code ?? '') && cloudOk()) { c.cancel(); active.current = 'cloud'; setEngine('cloud'); setNotice('Browser dictation could not hear you, so FRIDAY switched to AI transcription with your key.'); cc.lang = langRef.current; void cc.start(); return; }
+      setError(m + (cloudOk() ? '' : ' Tip: add a Gemini or OpenAI key in Settings to use AI transcription instead.')); } });
+    return () => { c.cancel(); cc.cancel(); };
+  }, [c, cc]);
+  const cur = () => (active.current === 'cloud' ? cc : c);
   return {
-    supported: c.supported, state, interim, error, lang, signal,
-    start: () => { setError(''); c.lang = lang; c.start(); },
-    pause: () => c.pause(), resume: () => c.resume(), stop: () => c.stop(), cancel: () => c.cancel(),
-    setLang: (l: string) => { setLangState(l); c.lang = l; },
+    supported: c.supported || cc.supported, state, interim, error, notice, lang, signal, mode, engine,
+    start: () => {
+      setError(''); setNotice(''); const m = modeRef.current;
+      const useCloud = m === 'cloud' || (m === 'auto' && !c.supported && cloudOk());
+      active.current = useCloud ? 'cloud' : 'browser'; setEngine(active.current);
+      if (useCloud) { cc.lang = lang; void cc.start(); } else { c.lang = lang; c.start(); }
+    },
+    pause: () => cur().pause(), resume: () => cur().resume(), stop: () => cur().stop(), cancel: () => { c.cancel(); cc.cancel(); },
+    setLang: (l: string) => { setLangState(l); c.lang = l; cc.lang = l; },
+    setMode: (m: DictationMode) => { setDictationMode(m); setModeState(m); },
     clearError: () => setError(''),
   };
 }

@@ -15,6 +15,7 @@ import { generate, loadProvider, loadSaved, loadSpeed, friendlyError } from '../
 
 // IMPORT SIMULATION & EXPERIMENT COMPONENTS
 import VisualsStudio from './VisualsStudio';
+import DictationEngine from './DictationEngine';
 import MicTest from './MicTest';
 import VoicePicker from './VoicePicker';
 import VoiceMatrix from './VoiceMatrix';
@@ -770,6 +771,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                   {SPEECH_LANGS.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                 </select>
               </div>
+              <DictationEngine dict={dict} />
               <button onClick={() => setShowEquation(true)} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold flex items-center gap-1 w-fit"><Sigma className="w-3.5 h-3.5"/> Equation Dictation</button>
               {(dict.state === 'listening' || dict.state === 'starting') && <span data-testid="dict-signal" className={`text-[11px] font-semibold ${dict.signal === 'speech' || dict.signal === 'sound' ? 'text-emerald-700' : 'text-amber-700'}`}>{dict.signal === 'speech' ? '● hearing speech' : dict.signal === 'sound' ? '● sound detected' : dict.signal === 'audio' ? '● microphone open, waiting for sound…' : '● starting microphone…'}</span>}
               {dict.error && <span className="text-red-600 max-w-[260px]">{dict.error}</span>}

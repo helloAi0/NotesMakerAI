@@ -8,6 +8,7 @@ import { planJson } from '../lib/friday/plan';
 import * as router from '../lib/friday/route';
 import MarkdownView from './MarkdownView';
 import VoicePicker from './VoicePicker';
+import DictationEngine from './DictationEngine';
 import { FilesPanel, MemoryPanel, LearningPanel, MapPanel, BrainPanel } from './FridayPanels';
 
 type Tab = 'chat' | 'files' | 'memory' | 'learning' | 'map' | 'brain';
@@ -84,13 +85,13 @@ export default function FridayConsole({ variant, prefix, onClose }: { variant: '
         {onClose && <button onClick={onClose} aria-label="Close assistant" className="p-1.5 rounded hover:bg-slate-700 text-lg leading-none">×</button>}
       </div>
       <div role="tablist" className="flex bg-white border-b text-xs overflow-x-auto">{TABS.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} data-testid={`${prefix}-tab-${k}`} onClick={() => setTab(k)} className={`px-3 py-1.5 whitespace-nowrap border-b-2 ${tab === k ? 'border-amber-600 text-amber-700 font-semibold' : 'border-transparent text-slate-600 hover:bg-slate-50'}`}>{l}</button>)}</div>
-      {showVoice && <div className="px-3 py-2 bg-white border-b"><VoicePicker reader={reader} /></div>}
+      {showVoice && <div className="px-3 py-2 bg-white border-b flex flex-wrap gap-3 items-start"><VoicePicker reader={reader} /><DictationEngine dict={dict} /></div>}
       {tab === 'chat' ? <>
         <div ref={logRef} data-testid={`${prefix}-log`} className={`flex-1 min-h-0 overflow-y-auto p-3 space-y-2.5 bg-slate-50 ${page ? 'text-sm md:p-6' : 'text-[13px]'}`} aria-live="polite">
           {all.length === 0 && <div className="flex"><div className="max-w-[92%] rounded-2xl rounded-bl-sm px-3 py-2 bg-white border border-slate-200"><MarkdownView text={welcome()} /></div></div>}
           {all.map(m => <Bubble key={m.id} m={m} busy={busy} onSpeak={say} reader={reader} />)}
           {listening && <div className="text-[12px] text-red-600 animate-pulse">● {dict.signal === 'speech' ? 'hearing speech' : dict.signal === 'sound' ? 'sound detected' : 'listening, waiting for sound'}… {dict.interim && <span className="text-slate-600">“{dict.interim}”</span>}</div>}
-          {dict.error && <div className="text-[12px] text-red-600">{dict.error}</div>}{reader.error && <div className="text-[12px] text-red-600">{reader.error}</div>}
+          {dict.notice && <div className="text-[12px] text-emerald-700">{dict.notice}</div>}{dict.error && <div className="text-[12px] text-red-600">{dict.error}</div>}{reader.error && <div className="text-[12px] text-red-600">{reader.error}</div>}
         </div>
         {(busy || activeNode.length > 0) && <div className="px-2 py-1 bg-white border-t flex gap-1 overflow-x-auto" data-testid="pipeline" aria-label="Reasoning pipeline">{pipe.map(n => <span key={n.id} title={n.detail ?? ''} className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border ${n.status === 'active' ? 'border-amber-500 bg-amber-50 text-amber-800 animate-pulse' : n.status === 'done' ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : n.status === 'error' ? 'border-red-300 bg-red-50 text-red-700' : 'border-slate-200 text-slate-400'}`}>{n.label}{n.detail && n.status !== 'idle' && n.status !== 'skipped' ? ` · ${n.detail.length > 28 ? n.detail.slice(0, 26) + '…' : n.detail}` : ''}</span>)}</div>}
         <div className="px-2 pt-1.5 flex gap-1.5 overflow-x-auto bg-white border-t">{SUGGEST.map(s => <button key={s} onClick={() => void send(s, 'text')} disabled={busy} className="shrink-0 text-[11px] px-2 py-1 rounded-full border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-50">{s.length > 36 ? s.slice(0, 34) + '…' : s}</button>)}</div>
