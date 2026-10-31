@@ -773,8 +773,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                 </select>
               </div>
               {(dict.state === 'listening' || dict.state === 'starting') && <span data-testid="dict-signal" className={`text-[11px] font-semibold ${dict.signal === 'speech' || dict.signal === 'sound' ? 'text-emerald-700' : 'text-amber-700'}`}>{dict.signal === 'speech' ? '● hearing speech' : dict.signal === 'sound' ? '● sound detected' : dict.signal === 'audio' ? '● microphone open, waiting for sound…' : '● starting microphone…'}</span>}
-              {dict.error && <span className="text-red-600 max-w-[260px]">{dict.error}</span>}
-              {dict.notice && <span className="text-[11px] text-emerald-700 max-w-[260px]">{dict.notice}</span>}
+              {dict.error ? <span className="text-red-600 max-w-[300px] text-[11px] leading-snug" data-testid="dict-error">{dict.error}</span> : dict.notice ? <span className="text-[11px] text-emerald-700 max-w-[300px] leading-snug">{dict.notice}</span> : null}
               <div className="relative flex items-center gap-1.5 flex-wrap">
                 <button onClick={() => setMicSetup(v => !v)} aria-expanded={micSetup} data-testid="mic-setup-toggle" className="px-2 py-1.5 rounded bg-slate-100 border border-slate-300 font-semibold flex items-center gap-1"><Mic className="w-3.5 h-3.5"/> Microphone setup {micSetup ? '▲' : '▼'}</button>
               <button onClick={() => setShowEquation(true)} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold flex items-center gap-1 "><Sigma className="w-3.5 h-3.5"/> Equation Dictation</button>
