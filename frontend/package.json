@@ -11,14 +11,14 @@
     "smoke": "tsx tools/smoke.mts",
     "fuzz": "tsx tools/fuzz.mts",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
-    "test:e2e": "node tools/e2e.mjs && node tools/e2e_sims.mjs && node tools/e2e_mic.mjs && node tools/e2e_mobile.mjs && node tools/e2e_agent.mjs && node tools/e2e_speak.mjs && node tools/e2e_friday.mjs",
+    "test:e2e": "node tools/e2e.mjs && node tools/e2e_sims.mjs && node tools/e2e_mic.mjs && node tools/e2e_mobile.mjs && node tools/e2e_agent.mjs && node tools/e2e_speak.mjs && node tools/e2e_friday.mjs && node tools/e2e_jarvis.mjs",
     "stubcheck": "vite-node tools/stubcheck.mts",
     "check": "npm run typecheck && npm run fuzz && npm run stubcheck && npm run build",
     "ocr:assets": "node tools/copy-ocr.mjs",
     "predev": "node tools/copy-ocr.mjs",
     "prebuild": "node tools/copy-ocr.mjs",
     "postinstall": "node tools/copy-ocr.mjs",
-    "test:unit": "tsx tools/intents.mts && tsx tools/fmt.mts && tsx tools/friday.mts && tsx tools/logic_cs.mts && tsx tools/logic_sci.mts && tsx tools/clawbot_reducer.mts"
+    "test:unit": "tsx tools/intents.mts && tsx tools/fmt.mts && tsx tools/friday.mts && tsx tools/logic_cs.mts && tsx tools/logic_sci.mts && tsx tools/friday_fs.mts && tsx tools/friday_brain.mts && tsx tools/logic_gap.mts && tsx tools/logic_extra.mts"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",

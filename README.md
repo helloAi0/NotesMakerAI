@@ -47,11 +47,30 @@ Tests: `npx tsx tools/friday.mts`, `npx tsx tools/intents.mts`, and with `npx vi
 ## Voice matrix, FRIDAY tracks and new simulations
 - **Click-to-speak** reads only when you click directly on a word in Read mode; the typing box never speaks.
 - **Edit pane** has a Dictate mic, a Read Page button and the Voice Modulation Matrix (English, Hindi, Arabic, Marathi, French, German; male/female; deep or melodic).
-- **FRIDAY** opens to two tracks: Research Knowledge Engine and Agentic OS / File Voice Controller. Without an AI key it runs structured commands offline; with a key in Settings it plans free-form goals in a loop.
+- **FRIDAY** is the single assistant (no separate bots). It chats, explains and derives maths/science, writes code, operates the app and a virtual file system, remembers facts about you, and learns answer styles from your 👍/👎. See "FRIDAY" below.
 - **Play** auto-sweeps one parameter on static simulations so something always moves.
 - New sims: Black–Scholes + Greeks, bullwhip, Nash equilibrium, DNA alignment, particle-filter localisation with LiDAR, planar quadcopter, 6-DOF arm FK/IK, Red-Black tree, Q-learning, Raft, ZK 3-colouring demo, traffic anomaly detector, CMOS inverter, Carnot cycle, NMR/IR, Ising, N-body, lattice-Boltzmann flow.
 - Tests: `npx tsx tools/{intents,fmt,friday,logic_cs,logic_sci,fuzz}.mts`, then e2e scripts against `vite preview`.
 
+## FRIDAY (one assistant)
+Open it from the sidebar or the floating button (Alt+A). Tabs: **Chat · Files · Memory · Learning · Map · Brain**.
 
-## ClawBot Core (self-hosted agent with live dashboard)
-See `clawbot/README.md` for setup and commands. In the app: sidebar → **ClawBot Core**.
+- **Brain order:** local model (Ollama / vLLM / LM Studio / llama.cpp on your computer) → cloud API key from Settings → built-in offline engine (STEM knowledge + your notes/PDFs, says so when it does not know). The ONLINE/OFFLINE switch in the header controls cloud and Wikipedia use. Wikipedia recall is off unless you say "search the web …" or enable it in Brain.
+- **Local model setup (works with no internet):**
+  `ollama pull llama3.1` then `OLLAMA_ORIGINS=* ollama serve` (vLLM: `vllm serve <model> --allowed-origins '["*"]'`). In the app: FRIDAY → Brain → *Find local model*.
+- **Jarvis actions:** e.g. "Friday, go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report". FRIDAY writes a JSON plan (viewable), runs it step by step with live status on the virtual file system (IndexedDB; folders /Documents /Inbox /PDF Processing /Reports /Captures /Notes /Trash; your PDF library is mounted at /PDF Library) and stops honestly at the first failing step. Deleting moves files to /Trash.
+- **Voice:** mic button streams speech into FRIDAY (English, Hindi, Arabic, Marathi, French, German selectable), spoken replies, hands-free conversation mode. The notebook toolbar has dictation into the text cursor and Read mode click-to-read from any word.
+- **Learning (reinforcement):** a softmax policy per question type chooses the answer style (concise, step-by-step, worked example, formal, analogy). 👍, 👎 (+reason), regenerate and copy are rewards; REINFORCE with a baseline updates it. Facts you tell it are stored in Memory (this browser only).
+- **Clustering:** your notes, PDFs, files, sims and past questions are embedded (TF-IDF), grouped by spherical k-means (k by silhouette) and projected with PCA in the Map tab; the nearest cluster focuses answers.
+- **Honest scope:** this is not true AGI. It is a language model (yours, local or cloud) plus tools, memory, a learned answer style and a critic. Without a connected model, open-ended conversation is limited to the offline engine.
+
+## Commands
+```
+cd frontend && npm install
+npm run dev                    # development
+npm run build && npx vite preview --port 5300 --host 127.0.0.1
+npx tsc --noEmit -p tsconfig.app.json && npm run lint
+npm run test:unit              # logic, FRIDAY plan/VFS/memory/RL/clustering
+BASE=http://127.0.0.1:5300 npm run test:e2e   # needs the preview server above and Playwright
+npx tsx tools/fuzz.mts         # every simulation x parameter combinations
+```

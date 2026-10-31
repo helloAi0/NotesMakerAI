@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Search, X } from 'lucide-react';
 import { searchEverything } from '../lib/friday';
-import { send } from '../lib/fridayChat';
+import { send } from '../lib/friday/brain';
 import { cap } from '../lib/agentBus';
 
 type Groups = Awaited<ReturnType<typeof searchEverything>>['groups'];

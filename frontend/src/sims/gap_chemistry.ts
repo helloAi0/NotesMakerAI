@@ -189,6 +189,6 @@ export const periodicTrends = defineSim<PtS>({
   },
   equations(s, v) {
     const e = ELEMENTS[clamp(s.sel, 1, ELEMENTS.length) - 1];
-    return ['Z_{\\mathrm{eff}} = Z - \\sigma \;\\Rightarrow\; \\text{radius}\\downarrow,\\ IE\\uparrow\\ \\text{across a period}', `\\mathrm{${e.sym}}(g) \\to \\mathrm{${e.sym}}^{+}(g) + e^{-}\\quad \\Delta H = IE_1 = ${e.ie}\\ \\mathrm{kJ\\,mol^{-1}}`, '\\chi_A-\\chi_B = 0.102\\sqrt{\\Delta_{AB}}\\ \\ (\\text{Pauling})'];
+    return ['Z_{\\mathrm{eff}} = Z - \\sigma \\;\\Rightarrow\\; \\text{radius}\\downarrow,\\ IE\\uparrow\\ \\text{across a period}', `\\mathrm{${e.sym}}(g) \\to \\mathrm{${e.sym}}^{+}(g) + e^{-}\\quad \\Delta H = IE_1 = ${e.ie}\\ \\mathrm{kJ\\,mol^{-1}}`, '\\chi_A-\\chi_B = 0.102\\sqrt{\\Delta_{AB}}\\ \\ (\\text{Pauling})'];
   },
 });

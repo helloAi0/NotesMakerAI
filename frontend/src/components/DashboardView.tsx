@@ -6,7 +6,7 @@ import { listDocs } from '../lib/libraryStore';
 import { noteDocs } from '../lib/friday';
 import { SIMS } from '../sims/registry';
 import type { ViewId } from '../lib/agentBus';
-import { send } from '../lib/fridayChat';
+import { send } from '../lib/friday/brain';
 
 /** Home screen: everything is computed from data on this device. */
 export default function DashboardView({ go }: { go: (v: ViewId) => void }) {
