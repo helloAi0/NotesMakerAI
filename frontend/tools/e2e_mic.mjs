@@ -19,7 +19,7 @@ await b.close();
 await pg.click('button:has-text("Test microphone")');
 await pg.waitForSelector('text=/permission was denied|No microphone|Could not open/', { timeout: 20000 }).then(async () => check('denied/blocked mic gives clear guidance: ' + (await pg.locator('text=/permission was denied|No microphone|Could not open/').first().innerText()).slice(0, 60), true)).catch(() => check('denied mic message', false));
 // 3. recognizer errors
-for (const [err, re] of [['not-allowed', /permission was denied/], ['audio-capture', /No microphone/], ['network', /network connection/], ['no-speech', /No speech was heard/]]) {
+for (const [err, re] of [['not-allowed', /permission was denied/], ['audio-capture', /No microphone/], ['network', /speech service/], ['no-speech', /No speech was heard/]]) {
   await pg.click('button:has-text("Start dictation")').catch(() => {}); await pg.waitForTimeout(150);
   await pg.evaluate(e => { const r = window.__recs.at(-1); r && r.onerror && r.onerror({ error: e }); r && r.onend && r.onend(); }, err); await pg.waitForTimeout(200);
   check(`dictation error "${err}" shown`, await pg.locator(`text=${re.source.replace(/\\/g, '')}`).first().isVisible().catch(() => false));
