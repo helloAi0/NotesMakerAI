@@ -88,7 +88,9 @@ export function useDictation(onFinal: (text: string, alternatives: string[]) => 
     supported: c.supported || cc.supported, state, interim, error, notice, lang, signal, mode, engine,
     start: () => {
       setError(''); setNotice(''); const m = modeRef.current;
-      const useCloud = m === 'cloud' || (m === 'auto' && !c.supported && cloudOk());
+      let chosen = ''; try { chosen = localStorage.getItem('nm_mic_device') || ''; } catch { /* ignore */ }
+      const useCloud = m === 'cloud' || (m === 'auto' && cloudOk() && (!c.supported || !!chosen)); // the browser recogniser can only use the Windows default microphone
+      if (m === 'auto' && chosen && !cloudOk()) setNotice('You chose a specific microphone, but browser dictation can only use the Windows default one. Add a Gemini or OpenAI key in Settings to dictate with the chosen microphone.');
       active.current = useCloud ? 'cloud' : 'browser'; setEngine(active.current);
       if (useCloud) { cc.lang = lang; void cc.start(); } else { c.lang = lang; c.start(); }
     },
