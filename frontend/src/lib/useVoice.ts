@@ -51,6 +51,7 @@ export function useDictation(onFinal: (text: string, alternatives: string[]) => 
   const [state, setState] = useState<SttState>('idle');
   const [interim, setInterim] = useState('');
   const [error, setError] = useState('');
+  const [signal, setSignal] = useState<'none' | 'audio' | 'sound' | 'speech'>('none');
   const [lang, setLangState] = useState('en-US');
   const finalRef = useRef(onFinal);
   finalRef.current = onFinal;
@@ -58,11 +59,11 @@ export function useDictation(onFinal: (text: string, alternatives: string[]) => 
   if (!ctl.current) ctl.current = new SpeechToTextController();
   const c = ctl.current;
   useEffect(() => {
-    c.setCallbacks({ onState: setState, onInterim: setInterim, onFinal: (t, a) => finalRef.current(t, a), onError: m => setError(m) });
+    c.setCallbacks({ onState: s => { setState(s); if (s === 'idle') setSignal('none'); }, onSignal: setSignal, onInterim: setInterim, onFinal: (t, a) => finalRef.current(t, a), onError: m => setError(m) });
     return () => c.cancel();
   }, [c]);
   return {
-    supported: c.supported, state, interim, error, lang,
+    supported: c.supported, state, interim, error, lang, signal,
     start: () => { setError(''); c.lang = lang; c.start(); },
     pause: () => c.pause(), resume: () => c.resume(), stop: () => c.stop(), cancel: () => c.cancel(),
     setLang: (l: string) => { setLangState(l); c.lang = l; },

@@ -18,10 +18,14 @@ const res = (txt: string, fin: boolean) => ({ resultIndex: 0, results: [Object.a
 }
 { // 3. network error stops the restart loop and reports a clear message
   const errs: string[] = []; const c = new SpeechToTextController({ onError: m => errs.push(m) }); c.start(); await wait(10);
-  last.onerror({ error: 'network' }); last.onend(); await wait(20); assert.ok(/Chrome or Edge/.test(errs[0])); assert.equal(c.status, 'idle'); console.log('PASS network error ends session with advice');
+  last.onerror({ error: 'network' }); last.onend(); await wait(20); assert.ok(/Online speech recognition/.test(errs[0])); assert.equal(c.status, 'idle'); console.log('PASS network error ends session with advice');
 }
 { // 4. sessions that keep closing instantly are reported, not "listening" forever
   const errs: string[] = []; const c = new SpeechToTextController({ onError: m => errs.push(m) }); c.start(); await wait(10);
   for (let i = 0; i < 4; i++) { last.onend(); await wait(10); } assert.ok(errs.some(m => /keeps closing/.test(m)), JSON.stringify(errs)); assert.equal(c.status, 'idle'); console.log('PASS instant-close loop detected');
+}
+{ // 5. signal events are reported (microphone open -> sound -> speech)
+  const sig: string[] = []; const c = new SpeechToTextController({ onSignal: x => sig.push(x) }); c.start(); await wait(10);
+  last.onaudiostart(); last.onsoundstart(); last.onspeechstart(); c.cancel(); assert.deepEqual(sig, ['none', 'audio', 'sound', 'speech']); console.log('PASS signal events');
 }
 console.log('stt OK');

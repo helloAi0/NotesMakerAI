@@ -173,6 +173,7 @@ type RecCtor = new () => SpeechRecognitionLike;
 interface SpeechRecognitionLike {
   lang: string; continuous: boolean; interimResults: boolean; maxAlternatives: number;
   onstart: (() => void) | null; onend: (() => void) | null;
+  onaudiostart?: (() => void) | null; onsoundstart?: (() => void) | null; onspeechstart?: (() => void) | null;
   onerror: ((e: { error: string }) => void) | null;
   onresult: ((e: RecResultEvent) => void) | null;
   start(): void; stop(): void; abort(): void;
@@ -192,8 +193,11 @@ export function isSpeechRecognitionSupported(): boolean { return recCtor() !== n
 
 export type SttState = 'idle' | 'starting' | 'listening' | 'paused';
 
+export type SttSignal = 'none' | 'audio' | 'sound' | 'speech';
 export interface SttCallbacks {
   onState?: (s: SttState) => void;
+  /** What the engine has noticed so far in this session: nothing, an open microphone, sound, or speech. */
+  onSignal?: (s: SttSignal) => void;
   /** Words still being recognised; replace, don't append. */
   onInterim?: (text: string) => void;
   /** A finished phrase (with the engine's alternatives, best first). */
@@ -203,10 +207,10 @@ export interface SttCallbacks {
 
 const STT_ERRORS: Record<string, string> = {
   'not-allowed': 'Microphone permission was denied. Allow the microphone in the browser address bar, or type instead.',
-  'service-not-allowed': 'Speech recognition is blocked for this page. You can type instead.',
+  'service-not-allowed': 'Speech recognition is blocked. In Windows turn ON Settings → Privacy & security → Speech → “Online speech recognition”, and allow the microphone for this site in the browser address bar.',
   'no-speech': 'No speech was heard. Try again, closer to the microphone.',
   'audio-capture': 'No microphone was found.',
-  network: 'Speech recognition could not reach its speech service. Chrome and Edge include one; Opera, Brave and Firefox do not. Open this app in Chrome or Edge, or type instead.',
+  network: 'Speech recognition could not reach its speech service. Check your internet connection. In Edge on Windows also turn ON Settings → Privacy & security → Speech → “Online speech recognition”. Opera, Brave and Firefox have no speech service at all (use Edge or Chrome).',
   'language-not-supported': 'That language is not supported for dictation here.',
   aborted: '',
 };
@@ -220,7 +224,7 @@ export class SpeechToTextController {
   private state: SttState = 'idle';
   private wantOn = false;
   private pendingInterim = ''; // last partial phrase; delivered as final if the browser ends without finalising it
-  private quickEnds = 0; private startedAt = 0;
+  private quickEnds = 0; private startedAt = 0; private heardSound = false; private watchdog: ReturnType<typeof setTimeout> | undefined;
   private cb: SttCallbacks;
   lang = 'en-US';
   continuous = true;
@@ -239,7 +243,14 @@ export class SpeechToTextController {
     this.setState('starting');
     const rec = new C();
     rec.lang = this.lang; rec.continuous = this.continuous; rec.interimResults = true; rec.maxAlternatives = 3;
-    rec.onstart = () => { this.startedAt = Date.now(); this.setState('listening'); };
+    rec.onstart = () => {
+      this.startedAt = Date.now(); this.setState('listening'); this.heardSound = false; this.cb.onSignal?.('none');
+      clearTimeout(this.watchdog); // microphone open but silent: usually the wrong input device (e.g. a Bluetooth headset that is not the system default)
+      this.watchdog = setTimeout(() => { if (this.wantOn && !this.heardSound && this.state === 'listening') this.cb.onError?.('The microphone is open but no sound is reaching the browser. Windows is using its DEFAULT input device: open Settings → System → Sound → Input, choose your headset (or laptop) microphone, speak, and watch the level bar move. Bluetooth headsets in “Headphones” mode have no microphone; select “Hands-Free” if listed.', 'no-sound'); }, 8000);
+    };
+    rec.onaudiostart = () => this.cb.onSignal?.('audio');
+    rec.onsoundstart = () => { this.heardSound = true; this.cb.onSignal?.('sound'); };
+    rec.onspeechstart = () => { this.heardSound = true; this.cb.onSignal?.('speech'); };
     rec.onresult = e => {
       let interim = ''; let gotFinal = false;
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -259,7 +270,7 @@ export class SpeechToTextController {
       if (msg) this.cb.onError?.(msg, e.error);
     };
     rec.onend = () => {
-      this.cb.onInterim?.('');
+      clearTimeout(this.watchdog); this.cb.onInterim?.('');
       // The browser ended the session while a phrase was still partial (always happens on a manual stop): keep what was heard.
       if (this.pendingInterim) { const t = this.pendingInterim; this.pendingInterim = ''; this.quickEnds = 0; this.cb.onFinal?.(t, [t]); }
       // Sessions that keep ending at once without hearing anything mean recognition does not work here; stop instead of showing "listening" forever.
@@ -278,7 +289,7 @@ export class SpeechToTextController {
   /** Stop; a phrase that was still being processed is still delivered. */
   stop() { this.wantOn = false; try { this.rec?.stop(); } catch { /* ignore */ } if (!this.rec) this.setState('idle'); else setTimeout(() => { if (this.rec && !this.wantOn) { /* the browser never fired onend */ const t = this.pendingInterim; this.pendingInterim = ''; try { this.rec?.abort(); } catch { /* ignore */ } this.rec = null; this.cb.onInterim?.(''); this.setState('idle'); if (t) this.cb.onFinal?.(t, [t]); } }, 2500); }
   /** Stop and throw away anything not yet delivered. */
-  cancel() { this.wantOn = false; this.pendingInterim = ''; try { this.rec?.abort(); } catch { /* ignore */ } this.rec = null; this.cb.onInterim?.(''); this.setState('idle'); }
+  cancel() { clearTimeout(this.watchdog); this.wantOn = false; this.pendingInterim = ''; try { this.rec?.abort(); } catch { /* ignore */ } this.rec = null; this.cb.onInterim?.(''); this.setState('idle'); }
 }
 
 /* ===== Backwards-compatible narration controller (DerivationViewer) ===== */

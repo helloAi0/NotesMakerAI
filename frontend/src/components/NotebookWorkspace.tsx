@@ -437,12 +437,13 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       if (ta) { ta.focus(); ta.setSelectionRange(caretRef.current!, caretRef.current!); }
     });
   };
+  const setQuiet = (page: number, v: string) => { applyingText.current = true; try { setNotesFor(page, v); } finally { applyingText.current = false; } }; // live preview edits stay out of the undo history
   const dict = useDictation(text => {
     // While dictating, an utterance that starts with a wake word ("computer, open the Kalman filter") is a command, not note text.
     const rng = interimRng.current; interimRng.current = null;
     if (rng) { // remove the live (interim) preview that was streamed into the editor
       const page = pageRef.current, cur = textRef.current[page] || '';
-      setNotesFor(page, cur.slice(0, rng.start) + cur.slice(rng.end)); caretRef.current = rng.start;
+      setQuiet(page, cur.slice(0, rng.start) + cur.slice(rng.end)); caretRef.current = rng.start;
     }
     if (looksLikeCommand(text)) { void import('../lib/agentRuntime').then(m => m.runCommand(text)); return; }
     insertAtCaret('', before => applyVoiceCommands(text, before.slice(-1)));
@@ -452,10 +453,10 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     const live = dict.interim.trim();
     if (dict.state !== 'listening' && dict.state !== 'starting') return;
     const page = pageRef.current, cur = textRef.current[page] || '', rng = interimRng.current;
-    if (!live) { if (rng) { setNotesFor(page, cur.slice(0, rng.start) + cur.slice(rng.end)); caretRef.current = rng.start; interimRng.current = null; } return; }
+    if (!live) { if (rng) { setQuiet(page, cur.slice(0, rng.start) + cur.slice(rng.end)); caretRef.current = rng.start; interimRng.current = null; } return; }
     const start = rng ? rng.start : Math.min(caretRef.current ?? cur.length, cur.length), base = rng ? cur.slice(0, rng.start) + cur.slice(rng.end) : cur;
     const prev = base.slice(Math.max(0, start - 1), start), text = (prev && !/\s/.test(prev) ? ' ' : '') + live;
-    setNotesFor(page, base.slice(0, start) + text + base.slice(start)); interimRng.current = { start, end: start + text.length }; caretRef.current = start + text.length;
+    setQuiet(page, base.slice(0, start) + text + base.slice(start)); interimRng.current = { start, end: start + text.length }; caretRef.current = start + text.length;
     if (inputModeRef.current !== 'keyboard') setInputMode('keyboard');
   }, [dict.interim]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const stop = () => dict.stop(); window.addEventListener('nm:stop-dictation', stop); return () => window.removeEventListener('nm:stop-dictation', stop); }, [dict]);
@@ -770,6 +771,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                 </select>
               </div>
               <button onClick={() => setShowEquation(true)} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold flex items-center gap-1 w-fit"><Sigma className="w-3.5 h-3.5"/> Equation Dictation</button>
+              {(dict.state === 'listening' || dict.state === 'starting') && <span data-testid="dict-signal" className={`text-[11px] font-semibold ${dict.signal === 'speech' || dict.signal === 'sound' ? 'text-emerald-700' : 'text-amber-700'}`}>{dict.signal === 'speech' ? '● hearing speech' : dict.signal === 'sound' ? '● sound detected' : dict.signal === 'audio' ? '● microphone open, waiting for sound…' : '● starting microphone…'}</span>}
               {dict.error && <span className="text-red-600 max-w-[260px]">{dict.error}</span>}
               <MicTest />
             </div>
