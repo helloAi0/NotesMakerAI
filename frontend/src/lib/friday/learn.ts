@@ -27,7 +27,7 @@ export class MemoryStore {
     const t = text.trim().replace(/\s+/g, ' ').slice(0, 300); if (t.length < 3) return null;
     const dup = this.items.find(m => m.text.toLowerCase() === t.toLowerCase()); if (dup) { dup.t = Date.now(); this.save(); return dup; }
     // a newer statement about the same slot replaces the older one ("my name is A" → "my name is B")
-    const slot = slotOf(t); if (slot) this.items = this.items.filter(m => slotOf(m.text) !== slot);
+    const slot = kind === 'episode' ? '' : slotOf(t); if (slot) this.items = this.items.filter(m => m.kind === 'episode' || slotOf(m.text) !== slot);
     const m: Memory = { id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, kind, text: t, t: Date.now(), hits: 0 }; this.items.push(m); this.save(); return m;
   }
   forget(query: string): number {

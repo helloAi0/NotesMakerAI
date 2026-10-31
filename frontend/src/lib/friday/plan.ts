@@ -128,7 +128,7 @@ const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 const sizeText = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n > 1024 ? `${Math.round(n / 1024)} KB` : `${n} chars`);
 
 function resolveWhat(what: string, ctx: PlanCtx, vfs: VFS): VNode[] {
-  if (what === '$captured') return ctx.captured.map(p => vfs.stat(p)).filter((n): n is VNode => !!n);
+  if (what === '$captured') return (ctx.captured.length ? ctx.captured : ctx.last).map(p => vfs.stat(p)).filter((n): n is VNode => !!n);
   if (what === '$last') return ctx.last.map(p => vfs.stat(p)).filter((n): n is VNode => !!n);
   const files = vfs.resolveFiles(what, ctx.cwd); if (files.length) return files;
   const d = vfs.resolveDir(stripDirWords(what) || what, ctx.cwd); return d ? [vfs.stat(d.path)!].filter(Boolean) : [];
@@ -158,7 +158,7 @@ export async function executePlan(plan: Plan, ctx: PlanCtx, d: ExecDeps): Promis
         case 'fs.cd': { const r = vfs.resolveDir(stripDirWords(a.dir) || a.dir, ctx.cwd); if (!r) { const near = vfs.walk('/', 3).filter(n => n.type === 'dir').slice(0, 8).map(n => n.path).join(', '); fail(`I could not find a folder like “${a.dir}”. Folders I can see: ${near}.`); } else { ctx.cwd = r.path; ctx.captured = []; ok(`Now in ${r.path} (${plural(vfs.list(r.path).length, 'item')}).`); } break; }
         case 'fs.ls': { const dir = a.dir ? vfs.resolveDir(stripDirWords(a.dir) || a.dir, ctx.cwd)?.path : ctx.cwd; if (!dir) fail(`No folder like “${a.dir}”.`); else { const l = vfs.list(dir); ok(l.length ? `${dir}: ${l.map(n => n.name + (n.type === 'dir' ? '/' : '')).join(', ')}` : `${dir} is empty.`, l.map(n => n.path)); } break; }
         case 'fs.tree': ok('Folder tree:\n' + vfs.tree('/', 3)); break;
-        case 'fs.mkdir': { const base = a.in ? vfs.resolveDir(stripDirWords(a.in) || a.in, ctx.cwd)?.path ?? ctx.cwd : ctx.cwd; const r = await vfs.mkdir(join(base, a.name.replace(/[\\]/g, '/'))); r.ok ? ok(r.message) : fail(r.message); break; }
+        case 'fs.mkdir': { const base = a.in ? vfs.resolveDir(stripDirWords(a.in) || a.in, ctx.cwd)?.path ?? ctx.cwd : ctx.cwd; const r = await vfs.mkdir(join(base, a.name.replace(/[\\]/g, '/'))); if (r.ok) { ctx.last = [r.path]; ok(r.message); } else fail(r.message); break; }
         case 'fs.capture': {
           const from = a.from ? vfs.resolveDir(stripDirWords(a.from) || a.from, ctx.cwd)?.path : ctx.cwd; if (!from) { fail(`I could not find the folder “${a.from}”.`); break; }
           const hits = vfs.resolveFiles(a.what, from, { recursive: false }).length ? vfs.resolveFiles(a.what, from, { recursive: false }) : vfs.resolveFiles(a.what, from);

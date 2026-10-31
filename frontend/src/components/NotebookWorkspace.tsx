@@ -1111,9 +1111,9 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       {/* 5. FOOTER */}
       <div className="no-print h-10 bg-white border-t border-slate-300 px-3 md:px-8 flex items-center justify-between text-xs text-slate-700 z-30">
         <div className="flex items-center gap-2">
-          <button disabled={currentPage === 1} onClick={() => setCurrentPage(c => c - 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronLeft className="w-4 h-4"/></button>
+          <button aria-label="Previous page" disabled={currentPage === 1} onClick={() => setCurrentPage(c => c - 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronLeft className="w-4 h-4"/></button>
           <span className="font-semibold">Page {currentPage} of {totalPages}</span>
-          <button disabled={currentPage === totalPages} onClick={() => setCurrentPage(c => c + 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronRight className="w-4 h-4"/></button>
+          <button aria-label="Next page" disabled={currentPage === totalPages} onClick={() => setCurrentPage(c => c + 1)} className="p-1 rounded hover:bg-slate-200 disabled:opacity-40"><ChevronRight className="w-4 h-4"/></button>
         </div>
         <div className="text-slate-500 truncate ml-2 hidden sm:block">
           {activeTab === 'Visuals' ? 'Simulation Studio' : inputMode === 'read' ? 'Click any sentence to hear it from there.' : inputMode === 'keyboard' ? 'Editing notes' : 'Drawing'}

@@ -218,7 +218,7 @@ export function searchAll(q: string): Reply {
   const lines: string[] = []; const chips: Chip[] = [];
   if (sims.length) { lines.push('Simulations: ' + sims.map(x => x.s.title).join('; ')); sims.forEach(x => chips.push({ label: x.s.title.length > 36 ? x.s.title.slice(0, 34) + '…' : x.s.title, cmd: `open ${x.s.title}` })); }
   if (pages.length) { lines.push('In your notes: ' + pages.map(x => `“${x.p.title}” page ${x.p.page}`).join('; ')); pages.forEach(x => chips.push({ label: `Page ${x.p.page}`, cmd: `go to the notebook -> go to page ${x.p.page}` })); }
-  if (topics.length) lines.push('Curriculum: ' + topics.map(t => `${t.title} (${t.status})`).join('; '));
+  if (topics.length) lines.push('Curriculum: ' + topics.map(t => (t.status === 'working' ? t.title : `${t.title} (${t.status})`)).join('; '));
   return { text: lines.length ? lines.join('\n') : `Nothing matched “${q}” in the simulations, your notes or the curriculum list.`, chips };
 }
 export function helpText(): string {

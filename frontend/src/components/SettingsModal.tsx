@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, KeyRound, Download, Upload, Trash2, CheckCircle2, Loader2 } from 'lucide-react';
 import { PROVIDERS, PROVIDER_IDS, loadProvider, loadSaved, saveConfig, saveProvider, loadSpeed, saveSpeed, generate } from '../lib/aiClient';
 import type { ProviderId, Speed } from '../lib/aiClient';
+import { vfs } from '../lib/friday/vfs';
 
 const isData = (k: string) => k.startsWith('notesmaker_') || k.startsWith('nm_') || k === 'gemini_api_key';
 const isSecret = (k: string) => k.startsWith('ai_') || k === 'gemini_api_key';
@@ -24,13 +25,13 @@ export default function SettingsModal() {
     try { const r = await generate({ provider, apiKey: key.trim(), model: model.trim(), baseUrl: baseUrl.trim(), speed }, 'Reply with the single word: ready', { stream: false, retries: 0, timeoutMs: 20000, maxTokens: 20 }); setMsg(`Connected ✓ (${r.trim().slice(0, 40)})`); }
     catch (e) { setMsg(`Could not connect: ${(e as Error).message.slice(0, 160)}`); } finally { setBusy(false); }
   };
-  const exportData = () => {
-    const out: Record<string, string> = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; if (isData(k) && (withKeys || !isSecret(k))) out[k] = localStorage.getItem(k) ?? ''; }
-    const blob = new Blob([JSON.stringify({ app: 'notes-maker-ai', version: 1, exported: new Date().toISOString(), data: out }, null, 1)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `notes-maker-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); setMsg(`Exported ${Object.keys(out).length} items${withKeys ? ' (including AI keys — keep this file private)' : ''}.`);
+  const exportData = async () => {
+    const out: Record<string, string> = {}; await vfs().ready(); const files = vfs().walk('/', 12).filter(n => n.type === 'file' && !n.source && !n.blob && (n.text ?? '').length < 400_000).map(n => ({ path: n.path, text: n.text ?? '', mime: n.mime })); for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; if (isData(k) && (withKeys || !isSecret(k))) out[k] = localStorage.getItem(k) ?? ''; }
+    const blob = new Blob([JSON.stringify({ app: 'notes-maker-ai', version: 1, exported: new Date().toISOString(), data: out, vfs: files }, null, 1)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `notes-maker-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); setMsg(`Exported ${Object.keys(out).length} items + ${files.length} FRIDAY file(s)${withKeys ? ' (including AI keys — keep this file private)' : ''}.`);
   };
   const importData = async (f: File) => {
-    try { const j = JSON.parse(await f.text()); if (j.app !== 'notes-maker-ai' || typeof j.data !== 'object') throw new Error('not a Notes Maker AI backup'); let n = 0; for (const [k, v] of Object.entries(j.data as Record<string, string>)) if (isData(k) && typeof v === 'string') { localStorage.setItem(k, v); n++; } setMsg(`Imported ${n} items. Reloading…`); setTimeout(() => location.reload(), 900); }
+    try { const j = JSON.parse(await f.text()); if (j.app !== 'notes-maker-ai' || typeof j.data !== 'object') throw new Error('not a Notes Maker AI backup'); let n = 0; for (const [k, v] of Object.entries(j.data as Record<string, string>)) if (isData(k) && typeof v === 'string') { localStorage.setItem(k, v); n++; } let nf = 0; if (Array.isArray(j.vfs)) { await vfs().ready(); for (const f of j.vfs as { path: string; text: string; mime?: string }[]) if (typeof f?.path === 'string' && typeof f.text === 'string') { await vfs().writeText(f.path, f.text, f.mime ? { mime: f.mime } : {}); nf++; } } setMsg(`Imported ${n} items${nf ? ` and ${nf} FRIDAY file(s)` : ''}. Reloading…`); setTimeout(() => location.reload(), 900); }
     catch (e) { setMsg(`Import failed: ${(e as Error).message}`); }
   };
   const reset = () => { if (!confirm('Delete ALL notes, tasks, chat history and settings on this device? PDFs in the library are removed too. This cannot be undone.')) return; const ks: string[] = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i)!; if (isData(k) || isSecret(k)) ks.push(k); } ks.forEach(k => localStorage.removeItem(k)); try { indexedDB.databases?.().then(dbs => dbs.forEach(d => d.name && indexedDB.deleteDatabase(d.name))); } catch { /* ignore */ } setMsg('Cleared. Reloading…'); setTimeout(() => location.reload(), 900); };

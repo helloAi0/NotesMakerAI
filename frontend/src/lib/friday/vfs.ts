@@ -179,7 +179,7 @@ export class VFS {
   async rename(path: string, newName: string): Promise<{ ok: boolean; message: string; path?: string }> {
     const n = normPath(path), node = this.stat(n); if (!node) return { ok: false, message: `${n} does not exist.` }; let nm = newName.trim().replace(/[\\/]/g, '-'); if (node.type === 'file' && !/\.[A-Za-z0-9]{1,5}$/.test(nm)) nm += (node.name.match(/\.[A-Za-z0-9]{1,5}$/)?.[0] ?? ''); if (!nm) return { ok: false, message: 'Give the new name.' };
     if (node.source?.kind === 'lib') return { ok: false, message: 'Rename library documents from the PDF Library screen.' };
-    const target = join(node.parent, nm); if (this.stat(target)) return { ok: false, message: `${target} already exists.` }; return this.move(n, target);
+    const target = join(node.parent, nm); if (this.stat(target)) return { ok: false, message: `${target} already exists.` }; const r = await this.move(n, target); return r.ok ? { ...r, message: `Renamed ${node.name} → ${nm}.` } : r;
   }
   stats() { const all = this.walk('/', 12); return { files: all.filter(n => n.type === 'file').length, dirs: all.filter(n => n.type === 'dir').length, bytes: all.reduce((a, n) => a + (n.type === 'file' ? n.size : 0), 0) }; }
 }

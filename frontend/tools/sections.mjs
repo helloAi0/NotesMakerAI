@@ -1,0 +1,17 @@
+const { chromium } = await import('playwright');
+const BASE = process.env.BASE || 'http://127.0.0.1:5300';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }); const ctx = await b.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true }); const pg = await ctx.newPage(); pg.setDefaultTimeout(8000);
+const errs = []; pg.on('pageerror', e => errs.push('PAGE ' + e.message)); pg.on('console', m => m.type() === 'error' && errs.push('console: ' + m.text().slice(0, 160)));
+const T = async (sel) => (await pg.locator(sel).first().innerText().catch(() => '(missing ' + sel + ')')).replace(/\n+/g, ' | ').slice(0, 300);
+const step = async (name, f) => { try { await f(); } catch (e) { console.log('!! ' + name + ': ' + e.message.split('\n')[0]); } };
+await pg.goto(BASE + '/'); await pg.waitForTimeout(1200);
+await step('dashboard', async () => { await pg.click('[data-testid=nav-dashboard]'); console.log('DASH', await T('[data-testid=dashboard-view]'));
+  for (const t of ['Ask FRIDAY', 'New note', 'Generate notes', 'Import PDFs']) { await pg.click('[data-testid=nav-dashboard]'); await pg.click(`button:has-text("${t}")`); await pg.waitForTimeout(500); console.log(' dash action', t, '->', (await pg.locator('main h1,main h2').first().innerText().catch(() => '?')).slice(0, 50)); } });
+await step('generator', async () => { await pg.click('[data-testid=nav-generator]'); await pg.fill('[data-testid=gen-topic]', 'Laplace transform'); await pg.click('[data-testid=gen-go]'); await pg.waitForSelector('[data-testid=gen-out]'); console.log('GEN', await T('[data-testid=gen-out]')); });
+await step('planner', async () => { await pg.click('[data-testid=nav-planner]'); console.log('PLAN', await T('[data-testid=planner-view]')); });
+await step('settings', async () => { await pg.click('[data-testid=open-settings]'); console.log('SET', await T('[data-testid=settings-modal]')); const dl = pg.waitForEvent('download', { timeout: 4000 }).catch(() => null); await pg.click('[data-testid=settings-modal] button:has-text("Export")').catch(() => console.log(' no Export button')); const d = await dl; console.log(' backup download:', d ? d.suggestedFilename() : 'none'); await pg.keyboard.press('Escape'); });
+await step('library', async () => { await pg.click('[data-testid=nav-library]'); console.log('LIB', await T('main')); });
+await step('notebook', async () => { await pg.click('[data-testid=nav-notebook]'); await pg.waitForTimeout(800); const btns = await pg.$$eval('main button', els => els.map(e => (e.getAttribute('aria-label') || e.title || e.innerText || '').trim()).filter(Boolean)); console.log('NB toolbar:', [...new Set(btns)].slice(0, 70).join(' · ')); });
+await step('studio', async () => { await pg.click('[data-testid=nav-simulations]'); await pg.waitForTimeout(800); console.log('STUDIO', await T('main')); });
+await step('search', async () => { await pg.keyboard.press('Control+k'); await pg.fill('[data-testid=search-input]', 'fourier'); await pg.waitForTimeout(600); console.log('SEARCH', await T('[data-testid=search-results]')); await pg.keyboard.press('Escape'); });
+console.log('ERRORS', errs); await b.close();

@@ -118,15 +118,16 @@ export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { 
     node('perceive', 'active');
     // ---- memory commands + durable facts
     const lower = q.toLowerCase().replace(/[?.!]+$/, '');
-    if (/^(?:what do you (?:remember|know) about me|show (?:my )?memor(?:y|ies)|what('?s| is) in your memory)$/.test(lower)) { const all = memory.all(); node('perceive', 'done'); const id = add({ who: 'bot', text: all.length ? 'Here is what I remember (stored only on this device):\n' + all.slice(0, 25).map(m => `• ${m.text}`).join('\n') + '\n\nSay “forget <word>” or “forget everything” to remove items.' : 'I do not remember anything about you yet. Tell me your name, what you study, or say “remember that …”.' }); done(id); return; }
+    if (/^(?:what do you (?:remember|know) about me|show (?:my )?memor(?:y|ies)|what('?s| is) in your memory)$/.test(lower)) { const all = memory.all().filter(m => m.kind !== 'episode'); node('perceive', 'done'); const id = add({ who: 'bot', text: all.length ? 'Here is what I remember (stored only on this device):\n' + all.slice(0, 25).map(m => `• ${m.text.replace(/\bthe user's\b/gi, 'your').replace(/\bthe user\b/gi, 'you')}`).join('\n') + '\n\nSay “forget <word>” or “forget everything” to remove items.' : 'I do not remember anything about you yet. Tell me your name, what you study, or say “remember that …”.' }); done(id); return; }
     { const f = lower.match(/^forget\s+(?:about\s+)?(.+)$/); if (f) { const n = memory.forget(f[1]); node('perceive', 'done'); const id = add({ who: 'bot', text: n ? `Forgotten: removed ${n} memor${n === 1 ? 'y' : 'ies'}.` : `I had nothing stored about “${f[1]}”.` }); done(id); return; } }
     const { facts, explicit } = extractFacts(q); for (const x of facts) memory.add(x, /prefers/.test(x) ? 'preference' : 'fact');
     node('perceive', 'done', facts.length ? `remembered ${facts.length} fact(s)` : undefined);
-    if (explicit && facts.length) { const id = add({ who: 'bot', text: `Got it, I will remember: ${facts[0]}.` }); done(id); node('learn', 'done', 'memory updated'); return; }
+    if (explicit && facts.length) { const id = add({ who: 'bot', text: `Got it, I will remember: ${facts[0].replace(/\bthe user's\b/gi, 'your').replace(/\bthe user\b/gi, 'you')}.` }); done(id); node('learn', 'done', 'memory updated'); return; }
 
     // ---- decide: act or chat
     node('plan', 'active'); await vfs().ready(); const steps = parseCommand(q);
-    const kinds = steps.map(s => s.intent.kind); const known = steps.length > 0 && steps.some(s => s.intent.kind !== 'unknown' && !(s.intent.kind === 'explain' && !SELF_EXPLAIN.test(s.raw))) && !steps.every(s => s.intent.kind === 'explain' && !SELF_EXPLAIN.test(s.raw));
+    const TYPING = /^(?:please\s+)?(?:friday[,:]?\s+)?(?:type|insert|dictate|write down|add text|put the text)\b/i; // "write a python function…" is a request, not text to type into the notebook
+    const kinds = steps.map(s => (s.intent.kind === 'insert_text' && !TYPING.test(q) ? 'unknown' : s.intent.kind)); const known = steps.length > 0 && steps.some((s, i) => kinds[i] !== 'unknown' && !(kinds[i] === 'explain' && !SELF_EXPLAIN.test(s.raw))) && !steps.every((s, i) => kinds[i] === 'unknown' || (kinds[i] === 'explain' && !SELF_EXPLAIN.test(s.raw)));
     let plan = planOffline(q, vfs(), planCtx); let fsPlan = hasFsSteps(plan);
     const libMove = q.match(/\b(?:move|put|file)\b.*\b(?:to|into)\s+(?:the\s+)?folder\s+["“']?([^"”',.]+?)["”']?\s*$/i); // PDF-library folders keep their own command
     const libFolder = !!libMove && listFolders().some(f => f.toLowerCase() === libMove[1].trim().toLowerCase()); if (libFolder) fsPlan = false;
@@ -168,7 +169,7 @@ export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { 
       else if (g?.note) note = g.note;
       node('reason', 'done', `${label}${STRATEGY_STYLE[strategy] ? ' · ' + strategy : ''}`);
     }
-    if (engine === 'offline' && !off.found && off.kind !== 'calc' && off.kind !== 'chat') text = `${off.text}\n\nI am answering from my built-in knowledge only. For open-ended questions, code, or long derivations, connect a language model: run \`ollama pull llama3.1\` and press “Find local model” in the Brain panel (works with no internet), or add an API key in Settings.`;
+    if (engine === 'offline' && !off.found && off.kind !== 'calc' && off.kind !== 'chat') text = "I can't answer that from my built-in knowledge, your notes or your PDFs. For open-ended questions, code, translation or step-by-step derivations, connect a language model: run `ollama pull llama3.1`, then open the Brain tab and press “Find local model” (works with no internet), or add an API key in Settings.";
     node('critic', 'active'); const cr = critique(q, text, ctxClass, { engine, found: off.found, sources: sources.length }); text = cr.text; node('critic', 'done', `confidence ${Math.round(cr.confidence * 100)}%${cr.notes.length ? ' · ' + cr.notes.join(', ') : ''}`);
     setLastOutput(text); patch(id, m => ({ ...m, text, streaming: false, engine, engineLabel: label, confidence: cr.confidence, notes: [...cr.notes, ...(note ? [note] : [])], sources: sources.slice(0, 6), chips: off.chips.slice(0, 4) }));
     node('learn', 'done', 'awaiting your feedback'); memory.add(`Asked about: ${q.slice(0, 90)}`, 'episode'); done(id);

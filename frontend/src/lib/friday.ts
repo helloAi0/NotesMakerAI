@@ -81,7 +81,7 @@ export async function searchEverything(q: string): Promise<{ text: string; chips
   const label: Record<string, string> = { sim: 'Simulations', glossary: 'Concepts', guide: 'App help', note: 'Your notes', pdf: 'Your PDFs' };
   const groups = Object.keys(label).map(kind => ({ kind: label[kind], items: hits.filter(h => h.doc.kind === kind).slice(0, 4).map(h => ({ title: h.doc.title, where: h.doc.where, cmd: h.doc.cmd, snippet: (h.doc.kind === 'pdf' || h.doc.kind === 'note' ? summarize(h.doc.text, 1, q)[0] || h.doc.text.slice(0, 140) : h.doc.text.replace(/^[^.]*\.\s*/, '')).slice(0, 150) })) })).filter(g => g.items.length);
   const cur = resolveCurriculum(SIMS).filter(t => t.title.toLowerCase().includes(q.toLowerCase())).slice(0, 3);
-  const text = groups.length ? groups.map(g => `${g.kind}: ${g.items.map(i => i.title + (i.where ? ` (${i.where})` : '')).join('; ')}`).join('\n') + (cur.length ? `\nCurriculum: ${cur.map(t => `${t.title} (${t.status})`).join('; ')}` : '') : `Nothing matched “${q}”.`;
+  const text = groups.length ? groups.map(g => `${g.kind}: ${g.items.map(i => i.title + (i.where ? ` (${i.where})` : '')).join('; ')}`).join('\n') + (cur.length ? `\nCurriculum: ${cur.map(t => (t.status === 'working' ? t.title : `${t.title} (${t.status})`)).join('; ')}` : '') : `Nothing matched “${q}”.`;
   const chips: Chip[] = groups.flatMap(g => g.items.filter(i => i.cmd).slice(0, 2).map(i => ({ label: i.title.length > 30 ? i.title.slice(0, 28) + '…' : i.title, cmd: i.cmd! }))).slice(0, 6);
   return { text, chips, groups };
 }

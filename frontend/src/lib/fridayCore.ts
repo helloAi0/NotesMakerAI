@@ -80,7 +80,14 @@ export function ask(ix: Index, q: string): Answer {
   if (/\d/.test(expr) && /[-+*/^×÷%]|\b(plus|minus|times|divided|over|squared|cubed|sqrt|sin|cos|tan|ln|log|exp)\b/i.test(expr)) {
     const v = calc(expr); if (v != null) return { text: `${expr} = ${fmtNum(v)}`, chips: [], sources: [], found: true, kind: 'calc', context: '' };
   }
-  const hits = retrieve(ix, q); if (!hits.length) return none('I could not find that in my built-in knowledge, your notes or your PDFs. Try different words, add the relevant PDF to the library, or add an AI key in Settings so I can answer any question with a full language model.');
+  const pc = expr.match(/^(-?\d+(?:\.\d+)?)\s*(?:%|percent|per cent)\s+of\s+(.+)$/i); if (pc) { const v = calc(`(${pc[1]}/100)*(${pc[2].replace(/,/g, '')})`); if (v != null) return { text: `${pc[1]}% of ${pc[2]} = ${fmtNum(v)}`, chips: [], sources: [], found: true, kind: 'calc', context: '' }; }
+  let hits = retrieve(ix, q); if (hits.length) { // relevance gate: the best document must actually contain the meaningful words of the question
+    const STOP = new Set(['what', 'whats', 'which', 'when', 'where', 'does', 'with', 'about', 'explain', 'tell', 'show', 'give', 'please', 'this', 'that', 'there', 'their', 'have', 'from', 'into', 'how', 'why', 'the', 'and', 'are', 'for', 'can', 'you', 'your', 'mean', 'means', 'work', 'works', 'define', 'describe', 'step', 'steps', 'simple', 'simply', 'example', 'examples', 'briefly', 'detail', 'detailed', 'easy', 'easily', 'short']);
+    const qt = (q.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter(w => !STOP.has(w)); const hay = (hits[0].doc.title + ' ' + hits[0].doc.text).toLowerCase();
+    if (qt.length && qt.filter(w => hay.includes(w.slice(0, Math.max(4, w.length - 2)))).length / qt.length < 0.4) hits = [];
+  }
+  if (hits.length && /^\s*(?:integrate|differentiate|solve|simplify|factori[sz]e|expand|prove|find the (?:integral|derivative|roots?))\b/i.test(q) && !['glossary', 'pdf', 'note'].includes(hits[0].doc.kind)) hits = []; // symbolic work needs a model; do not hand back an unrelated simulation
+  if (!hits.length) return none('I could not find that in my built-in knowledge, your notes or your PDFs. Try different words, add the relevant PDF to the library, or add an AI key in Settings so I can answer any question with a full language model.');
   const top = hits[0].doc; const lines: string[] = []; const chips: Chip[] = []; const sources: Answer['sources'] = [];
   const src = (d: KDoc) => { if (!sources.some(s => s.title === d.title && s.kind === d.kind)) sources.push({ kind: d.kind, title: d.title, where: d.where }); };
   const chip = (d: KDoc) => { if (d.cmd && chips.length < 4 && !chips.some(c => c.cmd === d.cmd)) chips.push({ label: d.kind === 'sim' ? `Open “${trim(d.title, 28)}”` : d.kind === 'glossary' ? `Try: ${trim(d.cmd.replace(/^open /, ''), 24)}` : d.title.length > 26 ? 'Do it' : d.title, cmd: d.cmd }); };

@@ -32,3 +32,7 @@ const items = Object.entries(T).flatMap(([k, a]) => a.map((t, i) => ({ id: `${k}
   const d = (a: typeof map.points[0], b: typeof map.points[0]) => Math.hypot(a.x - b.x, a.y - b.y); let intra = 0, ni = 0, inter = 0, ne = 0; for (const a of map.points) for (const b of map.points) if (a !== b) { if (a.cluster === b.cluster) { intra += d(a, b); ni++; } else { inter += d(a, b); ne++; } } assert.ok(intra / ni < inter / ne, 'projection separates clusters'); }
 assert.equal(clusterCorpus([items[0]]).k, 0); { const { rows } = tfidf(items.map(i => i.text)); const km = kmeans(rows, 3, 1); assert.equal(new Set(km.assign).size, 3); assert.ok(silhouette(rows, km.assign, 3) > 0.15); }
 console.log('friday brain (memory / RL / clustering) OK');
+{ // regression: an episode that quotes a fact ("Asked about: my name is …") must not overwrite the fact slot
+  const m = new MemoryStore(testKV(), 'slotreg'); m.add("The user's name is Taha", 'fact'); m.add('Asked about: my name is Taha and I study physics', 'episode');
+  if (!m.all().some(x => x.kind === 'fact' && /Taha/.test(x.text))) throw new Error('episode overwrote the name fact'); console.log('episode/fact slot OK');
+}
