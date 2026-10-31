@@ -397,6 +397,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   // Unified undo/redo for typed notes and shapes, in the order the edits were made (toolbar buttons and Ctrl+Z / Ctrl+Y).
   const textHist = useRef<Record<number, { s: string[]; i: number; t: number }>>({});
   const editOrder = useRef<{ k: 'text' | 'shape'; page: number }[]>([]); const redoOrder = useRef<{ k: 'text' | 'shape'; page: number }[]>([]);
+  const [micSetup, setMicSetup] = useState(false); const [voiceOpts, setVoiceOpts] = useState(false);
   const [, bumpHist] = useState(0); const applyingText = useRef(false);
   const recordText = (page: number, before: string, val: string) => {
     if (applyingText.current || before === val) return; const h = (textHist.current[page] ??= { s: [before], i: 0, t: 0 }); const now = Date.now();
@@ -664,7 +665,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       </div>
 
       {/* 3. RIBBON CONTENT */}
-      <div className="no-print bg-white px-4 py-2 flex items-center overflow-x-auto text-xs border-b border-slate-200 min-h-[96px] shadow-sm z-10 relative">
+      <div className={`no-print bg-white px-4 py-2 flex items-center ${activeTab === 'Voice' ? 'overflow-visible' : 'overflow-x-auto'} text-xs border-b border-slate-200 min-h-[96px] shadow-sm z-30 relative`}>
         
         {activeTab === 'Home' && (
           <div className="flex items-center gap-6">
@@ -771,11 +772,14 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                   {SPEECH_LANGS.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
                 </select>
               </div>
-              <DictationEngine dict={dict} />
-              <button onClick={() => setShowEquation(true)} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold flex items-center gap-1 w-fit"><Sigma className="w-3.5 h-3.5"/> Equation Dictation</button>
               {(dict.state === 'listening' || dict.state === 'starting') && <span data-testid="dict-signal" className={`text-[11px] font-semibold ${dict.signal === 'speech' || dict.signal === 'sound' ? 'text-emerald-700' : 'text-amber-700'}`}>{dict.signal === 'speech' ? '● hearing speech' : dict.signal === 'sound' ? '● sound detected' : dict.signal === 'audio' ? '● microphone open, waiting for sound…' : '● starting microphone…'}</span>}
               {dict.error && <span className="text-red-600 max-w-[260px]">{dict.error}</span>}
-              <MicTest />
+              {dict.notice && <span className="text-[11px] text-emerald-700 max-w-[260px]">{dict.notice}</span>}
+              <div className="relative flex items-center gap-1.5 flex-wrap">
+                <button onClick={() => setMicSetup(v => !v)} aria-expanded={micSetup} data-testid="mic-setup-toggle" className="px-2 py-1.5 rounded bg-slate-100 border border-slate-300 font-semibold flex items-center gap-1"><Mic className="w-3.5 h-3.5"/> Microphone setup {micSetup ? '▲' : '▼'}</button>
+              <button onClick={() => setShowEquation(true)} className="px-2 py-1.5 rounded bg-slate-800 text-white font-semibold flex items-center gap-1 "><Sigma className="w-3.5 h-3.5"/> Equation Dictation</button>
+                {micSetup && <div data-testid="mic-setup-panel" className="absolute left-0 top-full mt-1 z-40 w-[300px] max-h-[60vh] overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl p-3 flex flex-col gap-2"><DictationEngine dict={dict} /><MicTest /></div>}
+              </div>
             </div>
 
             <div className="flex flex-col gap-1">
@@ -797,10 +801,10 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                     <button onClick={reader.replay} disabled={reader.state === 'idle'} aria-label="Replay sentence" className="p-1.5 rounded bg-slate-100 border disabled:opacity-40"><RotateCcw className="w-3.5 h-3.5"/></button>
                     <button onClick={reader.stop} disabled={reader.state === 'idle'} aria-label="Stop" className="p-1.5 rounded bg-red-600 text-white disabled:opacity-40"><StopSquare className="w-3.5 h-3.5"/></button>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <VoiceMatrix reader={reader} />
-                    <VoicePicker reader={reader} />
+                  <div className="relative flex items-center gap-2 flex-wrap">
+                    <button onClick={() => setVoiceOpts(v => !v)} aria-expanded={voiceOpts} className="px-2 py-1.5 rounded bg-slate-100 border font-semibold">Voice options {voiceOpts ? '▲' : '▼'}</button>
                     {reader.state !== 'idle' && <span className="text-slate-500">Sentence {Math.max(reader.index, 0) + 1} / {reader.count}</span>}
+                    {voiceOpts && <div className="absolute left-0 top-full mt-1 z-40 w-[min(640px,90vw)] max-h-[60vh] overflow-y-auto bg-white border border-slate-300 rounded-xl shadow-2xl p-3 flex flex-col gap-2"><VoiceMatrix reader={reader} /><VoicePicker reader={reader} /></div>}
                   </div>
                   {reader.state !== 'idle' && <div className="h-1 bg-slate-200 rounded"><div className="h-1 bg-amber-600 rounded" style={{ width: `${((Math.max(reader.index, 0) + 1) / Math.max(reader.count, 1)) * 100}%` }} /></div>}
                   {reader.error && <span className="text-red-600">{reader.error}</span>}

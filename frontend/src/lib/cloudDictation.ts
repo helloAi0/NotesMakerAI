@@ -38,11 +38,11 @@ export async function transcribeWav(cfg: AiConfig, wav: Uint8Array, lang: string
   const code = lang.slice(0, 2).toLowerCase(); const name = LANG_NAME[code] ?? '';
   if (cfg.provider === 'gemini') {
     const prompt = `Transcribe this audio exactly as spoken${name ? ` (the language is ${name})` : ''}. Output only the spoken words with normal punctuation, nothing else. If there is no clear human speech, output exactly: [silence]`;
-    const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: 'audio/wav', data: b64(wav) } }] }], generationConfig: { temperature: 0, maxOutputTokens: 600 } });
+    const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: 'audio/wav', data: b64(wav) } }] }] });
     let lastErr: Error = new Error('Transcription failed');
     for (const model of geminiModels(cfg)) {
       const res = await fetch(`${PROVIDERS.gemini.baseUrl}/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body, signal });
-      if (res.status === 404 || res.status === 400) { lastErr = new SttHttpError(res.status, `Model ${model} rejected the request (${res.status}).`); continue; }
+      if (res.status === 404 || res.status === 400) { const txt = await res.text().catch(() => ''); if (/API key|API_KEY|permission|PERMISSION/i.test(txt)) throw new SttHttpError(401, txt.slice(0, 160)); lastErr = new SttHttpError(res.status, `Model ${model} rejected the request (${res.status}): ${txt.slice(0, 120)}`); continue; }
       if (!res.ok) throw new SttHttpError(res.status, (await res.text().catch(() => '')).slice(0, 200));
       const j = await res.json(); const t = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim();
       return /^\[?silence\]?\.?$/i.test(t) ? '' : t;

@@ -83,14 +83,15 @@ export function useDictation(onFinal: (text: string, alternatives: string[]) => 
       setError(m + (cloudOk() ? '' : ' Tip: add a Gemini or OpenAI key in Settings to use AI transcription instead.')); } });
     return () => { c.cancel(); cc.cancel(); };
   }, [c, cc]);
+  useEffect(() => { const h = () => { if (getDictationMode() === 'browser') { setDictationMode('auto'); setModeState('auto'); } }; window.addEventListener('nm:mic-chosen', h); return () => window.removeEventListener('nm:mic-chosen', h); }, []);
   const cur = () => (active.current === 'cloud' ? cc : c);
   return {
     supported: c.supported || cc.supported, state, interim, error, notice, lang, signal, mode, engine,
     start: () => {
       setError(''); setNotice(''); const m = modeRef.current;
       let chosen = ''; try { chosen = localStorage.getItem('nm_mic_device') || ''; } catch { /* ignore */ }
-      const useCloud = m === 'cloud' || (m === 'auto' && cloudOk() && (!c.supported || !!chosen)); // the browser recogniser can only use the Windows default microphone
-      if (m === 'auto' && chosen && !cloudOk()) setNotice('You chose a specific microphone, but browser dictation can only use the Windows default one. Add a Gemini or OpenAI key in Settings to dictate with the chosen microphone.');
+      const useCloud = m === 'cloud' || (cloudOk() && (!!chosen || (m === 'auto' && !c.supported))); // the browser recogniser can only use the Windows default microphone
+      if (m !== 'cloud' && chosen && !cloudOk()) setNotice('You chose a specific microphone, but browser dictation can only use the Windows default one. Add a Gemini or OpenAI key in Settings to dictate with the chosen microphone.');
       active.current = useCloud ? 'cloud' : 'browser'; setEngine(active.current);
       if (useCloud) { cc.lang = lang; void cc.start(); } else { c.lang = lang; c.start(); }
     },
