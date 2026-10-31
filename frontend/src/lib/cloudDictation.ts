@@ -33,17 +33,24 @@ export function canTranscribe(cfg: AiConfig | null): { ok: boolean; why?: string
   if (cfg.provider === 'anthropic' || cfg.provider === 'openrouter') return { ok: false, why: `${PROVIDERS[cfg.provider].label} does not offer speech-to-text. Choose Gemini or OpenAI (or a local Whisper server as “Other”) in Settings.` };
   return { ok: true };
 }
+let goodModel = ''; const noThink = new Set<string>();
 /** Transcribe one 16 kHz mono WAV clip. Returns '' for silence. */
 export async function transcribeWav(cfg: AiConfig, wav: Uint8Array, lang: string, signal?: AbortSignal): Promise<string> {
   const code = lang.slice(0, 2).toLowerCase(); const name = LANG_NAME[code] ?? '';
   if (cfg.provider === 'gemini') {
     const prompt = `Transcribe this audio exactly as spoken${name ? ` (the language is ${name})` : ''}. Output only the spoken words with normal punctuation, nothing else. If there is no clear human speech, output exactly: [silence]`;
-    const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: 'audio/wav', data: b64(wav) } }] }] });
+    const parts = [{ text: prompt }, { inline_data: { mime_type: 'audio/wav', data: b64(wav) } }];
+    const mk = (think: boolean) => JSON.stringify({ contents: [{ role: 'user', parts }], ...(think ? { generationConfig: { thinkingConfig: { thinkingLevel: 'minimal' } } } : {}) });
     let lastErr: Error = new Error('Transcription failed');
-    for (const model of geminiModels(cfg)) {
-      const res = await fetch(`${PROVIDERS.gemini.baseUrl}/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body, signal });
+    // Speed first: the fastest model that works is remembered and tried first on every later phrase.
+    const list = geminiModels({ ...cfg, speed: 'fast' }); const models = goodModel && list.includes(goodModel) ? [goodModel, ...list.filter(m => m !== goodModel)] : list;
+    for (const model of models) {
+      const url = `${PROVIDERS.gemini.baseUrl}/models/${model}:generateContent`, headers = { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() };
+      let res = await fetch(url, { method: 'POST', headers, body: mk(!noThink.has(model)), signal });
+      if (res.status === 400 && !noThink.has(model)) { const t = await res.clone().text().catch(() => ''); if (/think/i.test(t)) { noThink.add(model); res = await fetch(url, { method: 'POST', headers, body: mk(false), signal }); } }
       if (res.status === 404 || res.status === 400) { const txt = await res.text().catch(() => ''); if (/API key|API_KEY|permission|PERMISSION/i.test(txt)) throw new SttHttpError(401, txt.slice(0, 160)); lastErr = new SttHttpError(res.status, `Model ${model} rejected the request (${res.status}): ${txt.slice(0, 120)}`); continue; }
       if (!res.ok) throw new SttHttpError(res.status, (await res.text().catch(() => '')).slice(0, 200));
+      goodModel = model;
       const j = await res.json(); const t = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim();
       return /^\[?silence\]?\.?$/i.test(t) ? '' : t;
     }
@@ -85,7 +92,7 @@ export class CloudDictationController {
       catch (e) { if (id && (e as DOMException).name === 'OverconstrainedError') { try { localStorage.removeItem(MIC_DEVICE_KEY); } catch { /* ignore */ } this.stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } else throw e; }
       const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.ctx = new AC(); await this.ctx.resume(); this.rate = this.ctx.sampleRate;
-      this.src = this.ctx.createMediaStreamSource(this.stream); this.proc = this.ctx.createScriptProcessor(4096, 1, 1);
+      this.src = this.ctx.createMediaStreamSource(this.stream); this.proc = this.ctx.createScriptProcessor(2048, 1, 1);
       const mute = this.ctx.createGain(); mute.gain.value = 0; this.src.connect(this.proc); this.proc.connect(mute); mute.connect(this.ctx.destination);
       this.proc.onaudioprocess = e => this.onAudio(new Float32Array(e.inputBuffer.getChannelData(0)));
       this.heard = false; this.noise = 0.004; this.pre = []; this.seg = []; this.inSeg = false; this.cb.onSignal?.('audio'); this.setState('listening');
@@ -103,33 +110,37 @@ export class CloudDictationController {
     if (!voice) this.noise = this.noise * 0.95 + rms * 0.05; // follow the room noise while nobody speaks
     if (voice) { if (!this.heard) this.heard = true; this.cb.onSignal?.('speech'); } else if (rms > this.noise * 1.5) this.cb.onSignal?.('sound');
     if (!this.inSeg) {
-      this.pre.push(frame); if (this.pre.length > 4) this.pre.shift();
+      this.pre.push(frame); if (this.pre.length > 6) this.pre.shift();
       if (voice) { this.inSeg = true; this.seg = [...this.pre]; this.pre = []; this.segStart = now; this.lastVoice = now; this.lastPartialAt = now; this.voiceMs = 0; }
       return;
     }
     this.seg.push(frame); if (voice) { this.lastVoice = now; this.voiceMs += frame.length / this.rate * 1000; }
-    if (now - this.lastVoice > 750 || now - this.segStart > 12000) { this.endSegment(true); return; }
-    if (now - this.lastPartialAt > 2500 && this.voiceMs > 400) { this.lastPartialAt = now; this.requestClip(false); }
+    if (now - this.lastVoice > 450 || now - this.segStart > 12000) { this.endSegment(true); return; }
+    if (now - this.lastPartialAt > 500 && this.voiceMs > 250) { this.lastPartialAt = now; this.requestClip(false); }
   }
   private clip(): Uint8Array { let n = 0; for (const f of this.seg) n += f.length; const all = new Float32Array(n); let o = 0; for (const f of this.seg) { all.set(f, o); o += f.length; } return encodeWav(downsample(all, this.rate), Math.min(16000, this.rate)); }
   private endSegment(final: boolean) {
-    if (!this.inSeg) return; const long = this.voiceMs >= 250; if (long && final) this.requestClip(true);
+    if (!this.inSeg) return; const long = this.voiceMs >= 200; if (long && final) this.requestClip(true);
     this.inSeg = false; this.seg = []; this.voiceMs = 0; if (!long) this.cb.onInterim?.('');
   }
   private requestClip(final: boolean) {
     const cfg = this.getCfg(); if (!cfg) return; const wav = this.clip(); const mine = ++this.seq;
-    if (!final && this.pending > 0) return; // one request at a time for live previews
-    this.pending++; const signal = this.abort?.signal;
+    if (!final && this.pending > 0) return; // one live preview at a time
+    const signal = this.abort?.signal;
+    if (!final) {
+      this.pending++; // previews run at once (not behind finished phrases) so words show up as fast as the network allows
+      void (async () => { try { const text = await transcribeWav(cfg, wav, this.lang, signal); if (!signal?.aborted && mine === this.seq && this.inSeg && text && !HALLUCINATIONS.test(text)) this.cb.onInterim?.(text); } catch (e) { const st = (e as SttHttpError).status; if (!signal?.aborted && (st === 401 || st === 403)) { this.cb.onError?.('The AI provider rejected your key for transcription. Check the key in Settings.', 'transcribe'); this.cancel(); } } finally { this.pending--; } })();
+      return;
+    }
     this.queue = this.queue.then(async () => {
       try {
         const text = await transcribeWav(cfg, wav, this.lang, signal);
         if (signal?.aborted) return;
         if (final) { if (text && !HALLUCINATIONS.test(text)) this.cb.onFinal?.(text, [text]); else this.cb.onInterim?.(''); }
-        else if (mine === this.seq && this.inSeg && text && !HALLUCINATIONS.test(text)) this.cb.onInterim?.(text);
       } catch (e) {
         if (signal?.aborted) return; const st = (e as SttHttpError).status;
         if (final || st === 401 || st === 403) { this.cb.onError?.(st === 401 || st === 403 ? 'The AI provider rejected your key for transcription. Check the key in Settings.' : st === 429 ? 'Transcription rate limit reached. Pause for a moment and continue.' : `Transcription failed${st ? ` (${st})` : ''}: ${(e as Error).message.slice(0, 120)}`, 'transcribe'); if (st === 401 || st === 403) this.cancel(); }
-      } finally { this.pending--; }
+      }
     });
   }
   private teardown() { try { this.proc && (this.proc.onaudioprocess = null); this.proc?.disconnect(); this.src?.disconnect(); } catch { /* ignore */ } this.stream?.getTracks().forEach(t => t.stop()); void this.ctx?.close().catch(() => undefined); this.proc = null; this.src = null; this.stream = null; this.ctx = null; }

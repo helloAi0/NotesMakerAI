@@ -122,8 +122,8 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const reader = useReader();
   const inputModeRef = useRef<'pen' | 'keyboard' | 'read' | 'shapes'>('read');
   inputModeRef.current = inputMode;
-  const [clickSpeak, setClickSpeak] = useState(() => { try { return localStorage.getItem('nm_click_speak') !== '0'; } catch { return true; } });
-  useEffect(() => { try { localStorage.setItem('nm_click_speak', clickSpeak ? '1' : '0'); } catch { /* ignore */ } }, [clickSpeak]);
+  const [clickSpeak, setClickSpeak] = useState(() => { try { return localStorage.getItem('nm_click_speak2') === '1'; } catch { return false; } });
+  useEffect(() => { try { localStorage.setItem('nm_click_speak2', clickSpeak ? '1' : '0'); } catch { /* ignore */ } }, [clickSpeak]);
   const clickSpeakRef = useRef(clickSpeak); clickSpeakRef.current = clickSpeak;
   const [ocrWords, setOcrWords] = useState<{ [page: number]: OcrWord[] }>(() => { try { return JSON.parse(localStorage.getItem(`notesmaker_ocr_${notebookData?.title || 'default'}`) || '{}'); } catch { return {}; } });
   useEffect(() => { try { localStorage.setItem(`notesmaker_ocr_${notebookData?.title || 'default'}`, JSON.stringify(ocrWords)); } catch { /* ignore */ } }, [ocrWords]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -558,7 +558,13 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   }), []);
   useEffect(() => {
     if (!reader.segId) return;
-    document.querySelector(`[data-seg="${reader.segId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    // Scroll only the page's own scroller. scrollIntoView() also scrolls every ancestor, which pushed the ribbon off screen.
+    const el = document.querySelector(`[data-seg="${reader.segId}"]`) as HTMLElement | null; if (!el) return;
+    let sc: HTMLElement | null = el.parentElement;
+    while (sc && !(/(auto|scroll)/.test(getComputedStyle(sc).overflowY) && sc.scrollHeight > sc.clientHeight + 1)) sc = sc.parentElement;
+    if (!sc) return;
+    const a = el.getBoundingClientRect(), b = sc.getBoundingClientRect();
+    if (a.top < b.top + 40 || a.bottom > b.bottom - 40) sc.scrollTo({ top: sc.scrollTop + (a.top - b.top) - b.height / 2 + a.height / 2, behavior: 'smooth' });
   }, [reader.segId]);
 
   const renderSent = (x: SpeechSegment) => (
