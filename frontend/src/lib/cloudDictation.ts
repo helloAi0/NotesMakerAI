@@ -73,7 +73,7 @@ export class CloudDictationController {
   private getCfg: () => AiConfig | null;
   private stream: MediaStream | null = null; private ctx: AudioContext | null = null; private proc: ScriptProcessorNode | null = null; private src: MediaStreamAudioSourceNode | null = null;
   private pre: Float32Array[] = []; private seg: Float32Array[] = []; private inSeg = false; private segStart = 0; private lastVoice = 0; private lastPartialAt = 0; private voiceMs = 0;
-  private noise = 0.004; private heard = false; private queue: Promise<void> = Promise.resolve(); private pending = 0; private seq = 0; private abort: AbortController | null = null; private rate = 48000; private stopping = false; private preview: { text: string; voiceAt: number } | null = null;
+  private noise = 0.004; private heard = false; private queue: Promise<void> = Promise.resolve(); private seq = 0; private abort: AbortController | null = null; private rate = 48000; private stopping = false; private preview: { text: string; voiceAt: number } | null = null; private flight: { voiceAt: number; waiter: boolean; text: string; done: Promise<void> } | null = null; private reqVoiceAt = -1;
 
   constructor(getCfg: () => AiConfig | null, cb: SttCallbacks = {}) { this.getCfg = getCfg; this.cb = cb; }
   get supported() { return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && !!(window.AudioContext || (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext); }
@@ -111,40 +111,57 @@ export class CloudDictationController {
     if (voice) { if (!this.heard) this.heard = true; this.cb.onSignal?.('speech'); } else if (rms > this.noise * 1.5) this.cb.onSignal?.('sound');
     if (!this.inSeg) {
       this.pre.push(frame); if (this.pre.length > 6) this.pre.shift();
-      if (voice) { this.inSeg = true; this.preview = null; this.seg = [...this.pre]; this.pre = []; this.segStart = now; this.lastVoice = now; this.lastPartialAt = now; this.voiceMs = 0; }
+      if (voice) { this.inSeg = true; this.preview = null; this.reqVoiceAt = -1; this.seg = [...this.pre]; this.pre = []; this.segStart = now; this.lastVoice = now; this.lastPartialAt = now; this.voiceMs = 0; }
       return;
     }
     this.seg.push(frame); if (voice) { this.lastVoice = now; this.voiceMs += frame.length / this.rate * 1000; }
-    if (now - this.lastVoice > 450 || now - this.segStart > 12000) { this.endSegment(true); return; }
-    if (now - this.lastPartialAt > 500 && this.voiceMs > 250) { this.lastPartialAt = now; this.requestClip(false); }
+    const quiet = now - this.lastVoice;
+    if (quiet > 450 || now - this.segStart > 12000) { this.endSegment(true); return; }
+    // The moment speech pauses, transcribe everything said so far: by the time the pause counts as the end of the phrase the text is usually ready.
+    if (quiet > 180 && this.voiceMs > 250 && this.reqVoiceAt !== this.lastVoice) this.requestClip(false);
+    else if (now - this.lastPartialAt > 500 && this.voiceMs > 250 && this.reqVoiceAt !== this.lastVoice) { this.lastPartialAt = now; this.requestClip(false); }
   }
   private clip(): Uint8Array { let n = 0; for (const f of this.seg) n += f.length; const all = new Float32Array(n); let o = 0; for (const f of this.seg) { all.set(f, o); o += f.length; } return encodeWav(downsample(all, this.rate), Math.min(16000, this.rate)); }
+  private commit(text: string) { this.queue = this.queue.then(() => { if (!this.abort?.signal.aborted) this.cb.onFinal?.(text, [text]); }); }
   private endSegment(final: boolean) {
     if (!this.inSeg) return; const long = this.voiceMs >= 200;
-    // The live preview already covers every spoken word when nothing was said after it: commit it at once instead of transcribing again.
-    const pv = this.preview; this.preview = null;
-    if (long && final && pv && pv.voiceAt === this.lastVoice) { const t = pv.text; this.queue = this.queue.then(() => { if (!this.abort?.signal.aborted) this.cb.onFinal?.(t, [t]); }); }
-    else if (long && final) this.requestClip(true);
+    // If a preview already covers every spoken word (nothing was said after it), commit it instead of transcribing again.
+    const pv = this.preview, fl = this.flight; this.preview = null;
+    if (long && final) {
+      if (pv && pv.voiceAt === this.lastVoice) this.commit(pv.text);
+      else if (fl && fl.voiceAt === this.lastVoice) { fl.waiter = true; this.queue = this.queue.then(async () => { await fl.done; if (fl.text && !this.abort?.signal.aborted) this.cb.onFinal?.(fl.text, [fl.text]); else if (!fl.text) this.cb.onInterim?.(''); }); }
+      else this.requestClip(true);
+    }
     this.inSeg = false; this.seg = []; this.voiceMs = 0; if (!long) this.cb.onInterim?.('');
   }
+  private fail(e: unknown) {
+    const st = (e as SttHttpError).status;
+    this.cb.onError?.(st === 401 || st === 403 ? 'The AI provider rejected your key for transcription. Check the key in Settings.' : st === 429 ? 'Transcription rate limit reached. Pause for a moment and continue.' : `Transcription failed${st ? ` (${st})` : ''}: ${(e as Error).message.slice(0, 120)}`, 'transcribe');
+    if (st === 401 || st === 403) this.cancel();
+  }
   private requestClip(final: boolean) {
-    const cfg = this.getCfg(); if (!cfg) return; const wav = this.clip(); const mine = ++this.seq, voiceAt = this.lastVoice;
-    if (!final && this.pending > 0) return; // one live preview at a time
-    const signal = this.abort?.signal;
+    const cfg = this.getCfg(); if (!cfg) return; if (!final && this.flight) return; // one live preview at a time
+    const wav = this.clip(); const mine = ++this.seq, voiceAt = this.lastVoice, signal = this.abort?.signal;
     if (!final) {
-      this.pending++; // previews run at once (not behind finished phrases) so words show up as fast as the network allows
-      void (async () => { try { const text = await transcribeWav(cfg, wav, this.lang, signal); if (!signal?.aborted && mine === this.seq && this.inSeg && text && !HALLUCINATIONS.test(text)) { this.preview = { text, voiceAt }; this.cb.onInterim?.(text); } } catch (e) { const st = (e as SttHttpError).status; if (!signal?.aborted && (st === 401 || st === 403)) { this.cb.onError?.('The AI provider rejected your key for transcription. Check the key in Settings.', 'transcribe'); this.cancel(); } } finally { this.pending--; } })();
+      this.reqVoiceAt = voiceAt; let done!: () => void;
+      const fl = { voiceAt, waiter: false, text: '', done: new Promise<void>(r => { done = r; }) }; this.flight = fl;
+      void (async () => {
+        try {
+          const text = await transcribeWav(cfg, wav, this.lang, signal); const good = !!text && !HALLUCINATIONS.test(text);
+          if (signal?.aborted) return;
+          if (fl.waiter) { fl.text = good ? text : ''; return; }
+          if (good && mine === this.seq && this.inSeg) { this.preview = { text, voiceAt }; this.cb.onInterim?.(text); }
+        } catch (e) { if (signal?.aborted) return; const st = (e as SttHttpError).status; if (fl.waiter || st === 401 || st === 403) this.fail(e); }
+        finally { if (this.flight === fl) this.flight = null; done(); }
+      })();
       return;
     }
     this.queue = this.queue.then(async () => {
       try {
         const text = await transcribeWav(cfg, wav, this.lang, signal);
         if (signal?.aborted) return;
-        if (final) { if (text && !HALLUCINATIONS.test(text)) this.cb.onFinal?.(text, [text]); else this.cb.onInterim?.(''); }
-      } catch (e) {
-        if (signal?.aborted) return; const st = (e as SttHttpError).status;
-        if (final || st === 401 || st === 403) { this.cb.onError?.(st === 401 || st === 403 ? 'The AI provider rejected your key for transcription. Check the key in Settings.' : st === 429 ? 'Transcription rate limit reached. Pause for a moment and continue.' : `Transcription failed${st ? ` (${st})` : ''}: ${(e as Error).message.slice(0, 120)}`, 'transcribe'); if (st === 401 || st === 403) this.cancel(); }
-      }
+        if (text && !HALLUCINATIONS.test(text)) this.cb.onFinal?.(text, [text]); else this.cb.onInterim?.('');
+      } catch (e) { if (signal?.aborted) return; this.fail(e); }
     });
   }
   private teardown() { try { this.proc && (this.proc.onaudioprocess = null); this.proc?.disconnect(); this.src?.disconnect(); } catch { /* ignore */ } this.stream?.getTracks().forEach(t => t.stop()); void this.ctx?.close().catch(() => undefined); this.proc = null; this.src = null; this.stream = null; this.ctx = null; }

@@ -166,8 +166,14 @@ export function buildNotes(raw: string, urlOrId = '', title = ''): LectureNotes 
     const formulas = findFormulas(text), definitions = findDefinitions(sents);
     const tt = tf(tokens(text)); const kw = [...tt.entries()].map(([w, c]) => [c * Math.log(1 + nDocs / (1 + (df.get(w) || 0))), w] as const).sort((a, b) => b[0] - a[0]);
     const surface = (w: string) => { const m = text.match(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\w*`, 'i')); return m ? m[0] : w; };
-    const defTitle = definitions[0]?.term; const k = kw.slice(0, 3).map(([, w]) => cap(surface(w)));
-    const t = defTitle && defTitle.split(/\s+/).length <= 3 ? (k.length > 1 && !k.some(x => x.toLowerCase() === defTitle.toLowerCase()) ? `${defTitle} and ${k[0]}` : defTitle) : k.length >= 2 ? `${k[0]} and ${k[1]}` : (k[0] || `Part ${i + 1}`);
+    const defTitle = definitions[0]?.term;
+    // key phrase: the most characteristic pair of neighbouring content words (e.g. "internal energy", "heat capacity")
+    const words = (text.toLowerCase().match(/[\p{L}\p{N}']+|[.!?,;:]/gu) || []); const pairs = new Map<string, number>();
+    for (let w = 0; w < words.length - 1; w++) { const a = words[w], b = words[w + 1]; if (a.length < 3 || b.length < 3 || STOP.has(a) || STOP.has(b) || /^[.!?,;:]$/.test(a + b)) continue; const k = `${a} ${b}`; pairs.set(k, (pairs.get(k) || 0) + 1); }
+    const idf = (w: string) => Math.log(1 + nDocs / (1 + (df.get(stem(w)) || 0)));
+    const phrase = [...pairs.entries()].filter(([, c]) => c >= 2).map(([k, c]) => [c * (idf(k.split(' ')[0]) + idf(k.split(' ')[1])), k] as const).sort((a, b) => b[0] - a[0])[0]?.[1];
+    const k = kw.slice(0, 3).map(([, w]) => cap(surface(w))); const titled = (x: string) => x.split(' ').map(cap).join(' ');
+    const t = defTitle && defTitle.split(/\s+/).length <= 3 ? (phrase && !phrase.includes(defTitle.toLowerCase()) && !defTitle.toLowerCase().includes(phrase.split(' ')[0]) ? `${defTitle} and ${titled(phrase)}` : defTitle) : phrase ? titled(phrase) : k.length >= 2 ? `${k[0]} and ${k[1]}` : (k[0] || `Part ${i + 1}`);
     const bullets = bulIdx.map(j => trim(sents[j])); for (const f of formulas.slice(0, 2)) { if (!bullets.some(b => b.includes(f.text))) bullets.push(`Formula: ${f.text}`); }
     return { id: i, start: g[0].t, end: groups[i + 1]?.[0].t ?? dur, title: t, summary: trim(sumIdx.map(j => sents[j]).join(' '), 260) || trim(text, 200), bullets, formulas, definitions, text, cues: g };
   });
