@@ -1138,6 +1138,13 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
         )}
       </div>
 
+      {reader.error && reader.state === 'idle' && (
+        <div data-testid="reader-error" role="alert" className="no-print fixed left-1/2 -translate-x-1/2 bottom-14 z-[56] max-w-[95vw] w-[28rem] flex items-start gap-2 px-3 py-2 rounded-xl bg-red-700 text-white shadow-xl text-xs">
+          <Volume2 className="w-4 h-4 shrink-0 mt-0.5" /><span className="flex-1">{reader.error}</span>
+          <button onClick={() => { setActiveTab('Voice'); setVoiceOpts(true); reader.clearError(); }} className="px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 font-semibold shrink-0">Voice options</button>
+          <button onClick={reader.clearError} aria-label="Dismiss" className="shrink-0 px-1">×</button>
+        </div>
+      )}
       {reader.state !== 'idle' && (
         <div data-testid="reader-bar" className="no-print fixed left-1/2 -translate-x-1/2 bottom-14 z-[55] flex items-center gap-2 px-3 py-2 rounded-full bg-slate-900 text-white shadow-xl text-xs max-w-[95vw]">
           <Volume2 className="w-4 h-4 text-amber-400 shrink-0" />

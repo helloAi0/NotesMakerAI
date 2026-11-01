@@ -107,8 +107,9 @@ export class SpeechEngine {
     if (!this.segs.length) return;
     this.idx = Math.max(0, Math.min(this.segs.length - 1, startIndex));
     this.session++;
-    this.synth.cancel();
-    this.speakCurrent(this.session);
+    const session = this.session, busy = this.synth.speaking || this.synth.pending;
+    if (busy) this.cancelNow();
+    this.speakCurrent(session);
   }
 
   /** Read one piece of text on its own (e.g. a clicked sentence). */
@@ -117,33 +118,48 @@ export class SpeechEngine {
     this.play(0);
   }
 
-  private speakCurrent(session: number) {
+  /** How long to wait for the browser to actually start talking before retrying / reporting. */
+  startTimeoutMs = 2500;
+  private cancelledAt = 0;
+  /** Chromium/Edge can silently drop a speak() issued right after cancel(), so every cancel is remembered and speak() waits it out. */
+  private cancelNow() { this.cancelledAt = Date.now(); this.synth?.cancel(); }
+  private speakCurrent(session: number, attempt = 0) {
     if (!this.synth || session !== this.session) return;
+    const settle = 90 - (Date.now() - this.cancelledAt); if (settle > 0) { setTimeout(() => { if (session === this.session) this.speakCurrent(session, attempt); }, settle); return; }
     const seg = this.segs[this.idx];
     if (!seg) { this.setState('idle'); this.cb.onEnd?.(); return; }
     const spoken = toSpeakableText(seg.text) || ' ';
     const u = new SpeechSynthesisUtterance(spoken);
-    const voice = this.pickVoice();
+    // attempt 0 uses the chosen voice; the retry uses the browser's default voice for the language (a chosen online voice may be unreachable)
+    const voice = attempt === 0 ? this.pickVoice() : null;
     if (voice) { u.voice = voice; u.lang = voice.lang; } else if (this.lang) u.lang = this.lang;
     u.rate = this.rate; u.pitch = this.pitch; u.volume = this.volume;
-    const myIndex = this.idx;
-    u.onstart = () => { if (session !== this.session) return; this.setState('playing'); this.cb.onSegment?.(myIndex, seg); };
-    u.onboundary = e => { if (session === this.session) this.cb.onProgress?.(myIndex, e.charIndex, spoken.length); };
+    const myIndex = this.idx; let started = false; let wd: ReturnType<typeof setTimeout> | undefined;
+    const failOrRetry = (why: string) => {
+      if (session !== this.session || started) return; clearTimeout(wd);
+      if (attempt === 0) { this.cancelNow(); setTimeout(() => this.speakCurrent(session, 1), 120); return; }
+      this.setState('idle');
+      this.cb.onError?.(`No sound came out (${why}). Check the volume and the output device, open “Voice options” and pick another voice (one that is not marked Online), then click the text again.`);
+    };
+    u.onstart = () => { started = true; clearTimeout(wd); if (session !== this.session) return; this.setState('playing'); this.cb.onSegment?.(myIndex, seg); };
+    u.onboundary = e => { started = true; if (session === this.session) this.cb.onProgress?.(myIndex, e.charIndex, spoken.length); };
     u.onend = () => {
-      if (session !== this.session) return;
+      clearTimeout(wd); if (session !== this.session) return;
       if (this.idx + 1 < this.segs.length) { this.idx++; this.speakCurrent(session); }
       else { this.setState('idle'); this.cb.onEnd?.(); }
     };
     u.onerror = e => {
       if (session !== this.session) return;
       const err = (e as SpeechSynthesisErrorEvent).error;
-      if (err === 'canceled' || err === 'interrupted') return;
-      this.setState('idle');
-      this.cb.onError?.(err === 'not-allowed' ? 'The browser blocked audio. Click Play again.' : `Speech failed (${err ?? 'unknown'}).`);
+      if (err === 'canceled' || err === 'interrupted') { failOrRetry(err); return; } // nobody cancelled this session on purpose: the browser dropped it
+      clearTimeout(wd); this.setState('idle');
+      this.cb.onError?.(err === 'not-allowed' ? 'The browser blocked audio. Click Play again.' : `Speech failed (${err ?? 'unknown'}). Open “Voice options” and pick another voice.`);
     };
     this.setState('playing');
     this.cb.onSegment?.(myIndex, seg);
+    if (this.synth.paused) this.synth.resume();
     this.synth.speak(u);
+    wd = setTimeout(() => failOrRetry('the browser never started speaking'), this.startTimeoutMs);
   }
 
   pause() { if (this.synth && this.state === 'playing') { this.synth.pause(); this.setState('paused'); } }
@@ -151,7 +167,7 @@ export class SpeechEngine {
   toggle() { if (this.state === 'playing') this.pause(); else if (this.state === 'paused') this.resume(); else this.play(this.idx); }
 
   stop() { this.hardStop(); this.idx = 0; }
-  private hardStop() { this.session++; if (this.synth) this.synth.cancel(); this.setState('idle'); }
+  private hardStop() { this.session++; if (this.synth) this.cancelNow(); this.setState('idle'); }
 
   next() { if (this.idx + 1 < this.segs.length) this.play(this.idx + 1); }
   prev() { this.play(Math.max(0, this.idx - 1)); }

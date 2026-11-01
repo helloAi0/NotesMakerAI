@@ -73,7 +73,7 @@ export class CloudDictationController {
   private getCfg: () => AiConfig | null;
   private stream: MediaStream | null = null; private ctx: AudioContext | null = null; private proc: ScriptProcessorNode | null = null; private src: MediaStreamAudioSourceNode | null = null;
   private pre: Float32Array[] = []; private seg: Float32Array[] = []; private inSeg = false; private segStart = 0; private lastVoice = 0; private lastPartialAt = 0; private voiceMs = 0;
-  private noise = 0.004; private heard = false; private queue: Promise<void> = Promise.resolve(); private seq = 0; private abort: AbortController | null = null; private rate = 48000; private stopping = false; private preview: { text: string; voiceAt: number } | null = null; private flight: { voiceAt: number; waiter: boolean; text: string; done: Promise<void> } | null = null; private reqVoiceAt = -1;
+  private noise = 0.004; private heard = false; private queue: Promise<void> = Promise.resolve(); private seq = 0; private abort: AbortController | null = null; private rate = 48000; private stopping = false; private preview: { text: string; voiceAt: number } | null = null; private flight: { voiceAt: number; waiter: boolean; text: string; done: Promise<void> } | null = null; private reqVoiceAt = -1; private gap = 500; private coolUntil = 0;
 
   constructor(getCfg: () => AiConfig | null, cb: SttCallbacks = {}) { this.getCfg = getCfg; this.cb = cb; }
   get supported() { return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && !!(window.AudioContext || (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext); }
@@ -115,11 +115,13 @@ export class CloudDictationController {
       return;
     }
     this.seg.push(frame); if (voice) { this.lastVoice = now; this.voiceMs += frame.length / this.rate * 1000; }
-    const quiet = now - this.lastVoice;
-    if (quiet > 450 || now - this.segStart > 12000) { this.endSegment(true); return; }
+    const quiet = now - this.lastVoice, segMs = now - this.segStart;
+    // Fast continuous speech: cut the audio into 2 to 5 second chunks at the tiniest gap between words, so every chunk is small, quick to transcribe and sent at once.
+    if (quiet > 450 || segMs > 5000 || (segMs > 2200 && quiet > 130)) { this.endSegment(true); return; }
+    const free = now >= this.coolUntil && this.reqVoiceAt !== this.lastVoice;
     // The moment speech pauses, transcribe everything said so far: by the time the pause counts as the end of the phrase the text is usually ready.
-    if (quiet > 180 && this.voiceMs > 250 && this.reqVoiceAt !== this.lastVoice) this.requestClip(false);
-    else if (now - this.lastPartialAt > 500 && this.voiceMs > 250 && this.reqVoiceAt !== this.lastVoice) { this.lastPartialAt = now; this.requestClip(false); }
+    if (quiet > 180 && this.voiceMs > 250 && free) this.requestClip(false);
+    else if (now - this.lastPartialAt > this.gap && this.voiceMs > 250 && free) { this.lastPartialAt = now; this.requestClip(false); }
   }
   private clip(): Uint8Array { let n = 0; for (const f of this.seg) n += f.length; const all = new Float32Array(n); let o = 0; for (const f of this.seg) { all.set(f, o); o += f.length; } return encodeWav(downsample(all, this.rate), Math.min(16000, this.rate)); }
   private commit(text: string) { this.queue = this.queue.then(() => { if (!this.abort?.signal.aborted) this.cb.onFinal?.(text, [text]); }); }
@@ -147,21 +149,21 @@ export class CloudDictationController {
       const fl = { voiceAt, waiter: false, text: '', done: new Promise<void>(r => { done = r; }) }; this.flight = fl;
       void (async () => {
         try {
-          const text = await transcribeWav(cfg, wav, this.lang, signal); const good = !!text && !HALLUCINATIONS.test(text);
+          const text = await transcribeWav(cfg, wav, this.lang, signal); const good = !!text && !HALLUCINATIONS.test(text); this.gap = Math.max(500, this.gap * 0.9);
           if (signal?.aborted) return;
           if (fl.waiter) { fl.text = good ? text : ''; return; }
           if (good && mine === this.seq && this.inSeg) { this.preview = { text, voiceAt }; this.cb.onInterim?.(text); }
-        } catch (e) { if (signal?.aborted) return; const st = (e as SttHttpError).status; if (fl.waiter || st === 401 || st === 403) this.fail(e); }
+        } catch (e) { if (signal?.aborted) return; const st = (e as SttHttpError).status; if (st === 429) { this.gap = Math.min(4000, this.gap * 2); this.coolUntil = performance.now() + this.gap; } if (fl.waiter || st === 401 || st === 403) this.fail(e); }
         finally { if (this.flight === fl) this.flight = null; done(); }
       })();
       return;
     }
+    // Start transcribing right now (several chunks can be in flight), but hand the text over strictly in speaking order.
+    const job = (async () => { for (let k = 0; ; k++) { try { return { text: await transcribeWav(cfg, wav, this.lang, signal) }; } catch (e) { if ((e as SttHttpError).status === 429 && k < 2 && !signal?.aborted) { await new Promise(r => setTimeout(r, 1200)); continue; } return { err: e }; } } })();
     this.queue = this.queue.then(async () => {
-      try {
-        const text = await transcribeWav(cfg, wav, this.lang, signal);
-        if (signal?.aborted) return;
-        if (text && !HALLUCINATIONS.test(text)) this.cb.onFinal?.(text, [text]); else this.cb.onInterim?.('');
-      } catch (e) { if (signal?.aborted) return; this.fail(e); }
+      const r = await job; if (signal?.aborted) return;
+      if ('err' in r) { this.fail(r.err); return; }
+      if (r.text && !HALLUCINATIONS.test(r.text)) this.cb.onFinal?.(r.text, [r.text]); else this.cb.onInterim?.('');
     });
   }
   private teardown() { try { this.proc && (this.proc.onaudioprocess = null); this.proc?.disconnect(); this.src?.disconnect(); } catch { /* ignore */ } this.stream?.getTracks().forEach(t => t.stop()); void this.ctx?.close().catch(() => undefined); this.proc = null; this.src = null; this.stream = null; this.ctx = null; }

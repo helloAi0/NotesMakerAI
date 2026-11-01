@@ -14,4 +14,10 @@ await pg.evaluate(() => window.speechSynthesis.cancel());
 await pg.click('button:text-is("Voice")'); await pg.click('button:has-text("Page")'); await pg.waitForTimeout(1500);
 ok('ribbon tabs stay in place while reading', (await tabTop()) === t0, `${t0} -> ${await tabTop()}`);
 await pg.evaluate(() => window.speechSynthesis.cancel());
+// a browser whose speech never starts: the student must see a message on the Home tab, not just a highlight
+const pg2 = await (await b.newContext({ viewport: { width: 1300, height: 700 } })).newPage(); pg2.setDefaultTimeout(9000);
+await pg2.addInitScript(() => { window.speechSynthesis.speak = () => {}; window.speechSynthesis.cancel = () => {}; });
+await pg2.goto(BASE + '/'); await pg2.waitForTimeout(800); await pg2.click('[data-testid=nav-notebook]'); await pg2.waitForTimeout(500);
+await pg2.click('[data-seg="c-0"]', { position: { x: 20, y: 8 } });
+await pg2.waitForSelector('[data-testid=reader-error]', { timeout: 9000 }).then(async () => ok('silent browser: error shown on the Home tab', /No sound came out/.test(await pg2.textContent('[data-testid=reader-error]')))).catch(() => ok('silent browser: error shown on the Home tab', false, 'no error toast'));
 ok('no page errors', errs.length === 0, errs.join('|')); await b.close(); console.log(fail ? `${fail} FAILED` : 'ALL PASS'); process.exit(fail ? 1 : 0);

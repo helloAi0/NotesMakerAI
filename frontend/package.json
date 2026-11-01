@@ -18,7 +18,7 @@
     "predev": "node tools/copy-ocr.mjs",
     "prebuild": "node tools/copy-ocr.mjs",
     "postinstall": "node tools/copy-ocr.mjs",
-    "test:unit": "tsx tools/intents.mts && vite-node tools/fmt.mts && tsx tools/friday.mts && tsx tools/logic_cs.mts && tsx tools/logic_sci.mts && tsx tools/friday_fs.mts && tsx tools/friday_brain.mts && tsx tools/logic_gap.mts && tsx tools/logic_extra.mts && tsx tools/stt.mts && tsx tools/lecture.mts && tsx tools/cloud_dictation.mts && tsx tools/lecture_adv.mts"
+    "test:unit": "tsx tools/intents.mts && vite-node tools/fmt.mts && tsx tools/friday.mts && tsx tools/logic_cs.mts && tsx tools/logic_sci.mts && tsx tools/friday_fs.mts && tsx tools/friday_brain.mts && tsx tools/logic_gap.mts && tsx tools/logic_extra.mts && tsx tools/stt.mts && tsx tools/lecture.mts && tsx tools/cloud_dictation.mts && tsx tools/cloud_dictation_fast.mts && tsx tools/tts_engine.mts && tsx tools/lecture_adv.mts"
   },
   "dependencies": {
     "@google/genai": "^2.30.0",

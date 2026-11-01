@@ -4,7 +4,7 @@
  *  - buildNotes: topic segmentation (lexical cohesion), titles, summaries, bullets, formulas, definitions, key terms
  * An optional AI pass (aiRefine) rewrites the sections with the user's own key.
  */
-import { generate, parseJsonLoose, pMap, concurrencyFor } from './aiClient';
+import { generate, geminiModels, parseJsonLoose, pMap, concurrencyFor } from './aiClient';
 import type { AiConfig } from './aiClient';
 
 export interface Cue { t: number; text: string }
@@ -15,7 +15,7 @@ export interface Section {
   formulas: Formula[]; definitions: Definition[]; text: string; cues: Cue[];
 }
 export interface LectureNotes {
-  title: string; videoId: string | null; timed: boolean; duration: number;
+  source?: string; title: string; videoId: string | null; timed: boolean; duration: number;
   overview: string[]; keyTerms: string[]; sections: Section[]; cues: Cue[];
 }
 
@@ -67,7 +67,7 @@ export function splitSentences(text: string): string[] {
 }
 
 /* ---------------- language helpers ---------------- */
-const STOP = new Set(('a an the and or but if then so of to in on at by for with from as is are was were be been being am do does did done have has had having it its this that these those there here we you i he she they them our your their my me us not no yes can could will would shall should may might must just very really also too than into onto over under about above below up down out off again once only own same such some any each few more most other both all what which who whom whose when where why how let lets us okay ok now well like going gonna want need get got one two three first next then thing things know see look say said says right actually basically today welcome back everyone guys hello hi thanks thank please yeah because while during before after between through using use used').split(/\s+/));
+const STOP = new Set(('a an the and or but if then so of to in on at by for with from as is are was were be been being am do does did done have has had having it its this that these those there here we you i he she they them our your their my me us not no yes can could will would shall should may might must just very really also too than into onto over under about above below up down out off again once only own same such some any each few more most other both all what which who whom whose when where why how let lets us okay ok now well like going gonna want need get got one two three first next then thing things know see look say said says right actually basically today welcome back everyone guys hello hi thanks thank please yeah because while during before after between through using use used der die das den dem des ein eine einer einen einem und oder aber ist sind war waren nicht kein keine zu von mit auf für fur ich du er sie es wir ihr sich auch an im als wie wenn dann so noch nur schon bei nach aus über uber um was wer wo hier dass dies diese dieser auch sehr mal ja nein bitte danke hallo है हैं और का की के में को से पर यह वह एक हम आप तो भी ही कि जो था थी थे हो').split(/\s+/));
 const FILLER = /\b(subscribe|like and|hit the bell|welcome back|welcome to|in this video|see you (?:in|next)|thanks for watching|sponsor|patreon|comment below|click the)\b/i;
 const stem = (w: string) => w.replace(/(?:ing|edly|ed|es|s)$/, m => (w.length - m.length >= 4 ? '' : m));
 export function tokens(text: string): string[] {
@@ -271,3 +271,25 @@ Cp is always larger than Cv for a gas because at constant pressure some heat is 
 For an ideal gas the two are related by Cp minus Cv equals R, where R is the gas constant.
 15:20
 That is all for today. Next time we will look at the second law and entropy.`;
+
+/* ---------------- read a public YouTube video with Gemini (needs the user's own Gemini key) ---------------- */
+export async function aiTranscribeVideo(cfg: AiConfig, videoId: string, signal?: AbortSignal): Promise<string> {
+  if (cfg.provider !== 'gemini') throw new Error('Reading a video from its link needs a Gemini key. Add one in Settings, or paste the transcript instead.');
+  const prompt = 'Transcribe the speech in this video. Write one line every 10 to 20 seconds. Start each line with its time in square brackets, like [00:00] or [1:02:30], then the words spoken, in the language spoken. Output only these lines and nothing else. If there is no speech, output exactly: [no speech]';
+  const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ file_data: { file_uri: `https://www.youtube.com/watch?v=${videoId}` } }, { text: prompt }] }] });
+  const base = 'https://generativelanguage.googleapis.com/v1beta'; let last = 'Gemini could not read this video.';
+  for (const model of geminiModels({ ...cfg, speed: 'fast' })) {
+    const res = await fetch(`${base}/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body, signal });
+    if (!res.ok) {
+      const t = await res.text().catch(() => ''); let msg = t.slice(0, 240); try { msg = JSON.parse(t)?.error?.message || msg; } catch { /* keep raw */ }
+      if (res.status === 429) throw new Error('Gemini says the rate limit is reached. Wait a minute and try again.');
+      if (res.status === 401 || res.status === 403 || /API key/i.test(msg)) throw new Error('Gemini rejected the key. Check it in Settings.');
+      last = `Gemini could not read this video (${res.status}): ${msg.slice(0, 160)}. Only public videos work; private, members-only or age-restricted videos do not.`;
+      if (res.status === 404 || res.status === 400) continue; throw new Error(last);
+    }
+    const j = await res.json(); const text = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim();
+    if (!text || /^\[?no speech\]?\.?$/i.test(text)) throw new Error('Gemini found no speech in that video.');
+    return text;
+  }
+  throw new Error(last);
+}
