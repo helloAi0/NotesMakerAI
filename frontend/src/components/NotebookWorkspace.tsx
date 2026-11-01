@@ -122,7 +122,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
   const reader = useReader();
   const inputModeRef = useRef<'pen' | 'keyboard' | 'read' | 'shapes'>('read');
   inputModeRef.current = inputMode;
-  const [clickSpeak, setClickSpeak] = useState(() => { try { return localStorage.getItem('nm_click_speak2') === '1'; } catch { return false; } });
+  const [clickSpeak, setClickSpeak] = useState(() => { try { return localStorage.getItem('nm_click_speak2') !== '0'; } catch { return true; } });
   useEffect(() => { try { localStorage.setItem('nm_click_speak2', clickSpeak ? '1' : '0'); } catch { /* ignore */ } }, [clickSpeak]);
   const clickSpeakRef = useRef(clickSpeak); clickSpeakRef.current = clickSpeak;
   const [ocrWords, setOcrWords] = useState<{ [page: number]: OcrWord[] }>(() => { try { return JSON.parse(localStorage.getItem(`notesmaker_ocr_${notebookData?.title || 'default'}`) || '{}'); } catch { return {}; } });

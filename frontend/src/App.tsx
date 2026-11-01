@@ -12,13 +12,14 @@ const AssistantDock = lazy(() => import('./components/AssistantDock'));
 const FridayView = lazy(() => import('./components/FridayView'));
 const DashboardView = lazy(() => import('./components/DashboardView'));
 const PlannerView = lazy(() => import('./components/PlannerView'));
+const LectureNotesStudio = lazy(() => import('./components/LectureNotesStudio'));
 const GeneratorView = lazy(() => import('./components/GeneratorView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
 const SearchPalette = lazy(() => import('./components/SearchPalette'));
 const Loading = () => <div className="h-full flex items-center justify-center text-sm text-slate-500 p-8">Loading…</div>;
-import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity, Menu, X, Bot, Settings, Wifi, WifiOff } from 'lucide-react';
+import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity, Menu, X, Bot, Settings, Wifi, WifiOff, Clapperboard } from 'lucide-react';
 
-const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', LayoutDashboard], ['friday', 'FRIDAY Assistant', Bot], ['generator', 'AI Note Generator', Sparkles], ['notebook', 'Digital Notebook', PenTool], ['simulations', 'Visuals Studio', Activity], ['planner', 'Study Planner', Calendar], ['library', 'PDF & Source Library', FileText]];
+const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', LayoutDashboard], ['friday', 'FRIDAY Assistant', Bot], ['generator', 'AI Note Generator', Sparkles], ['notebook', 'Digital Notebook', PenTool], ['lecture', 'Lecture to Notes', Clapperboard], ['simulations', 'Visuals Studio', Activity], ['planner', 'Study Planner', Calendar], ['library', 'PDF & Source Library', FileText]];
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -104,6 +105,7 @@ export default function App() {
             {activeTab === 'friday' && <FridayView />}
             {activeTab === 'generator' && <GeneratorView />}
             {activeTab === 'notebook' && <NotebookWorkspace />}
+            {activeTab === 'lecture' && <LectureNotesStudio />}
             {activeTab === 'simulations' && (
               <div className="h-full overflow-y-auto p-3 md:p-8 bg-slate-100">
                 <VisualsStudio />

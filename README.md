@@ -74,3 +74,7 @@ npm run test:unit              # logic, FRIDAY plan/VFS/memory/RL/clustering
 BASE=http://127.0.0.1:5300 npm run test:e2e   # needs the preview server above and Playwright
 npx tsx tools/fuzz.mts         # every simulation x parameter combinations
 ```
+
+## Lecture to Notes (Phase 9)
+
+Sidebar → **Lecture to Notes**. Paste a YouTube link and the lecture transcript (YouTube ⋯ → Show transcript → copy, or load an `.srt`/`.vtt`/`.txt` file). The app keeps timestamps, splits the lecture into topic sections (lexical cohesion), and writes a summary, key points, formulas (written or spoken, e.g. "delta U equals Q minus W" → `ΔU = Q − W`), definitions and key terms. Clicking a timestamp seeks the embedded player; the active section follows the video. Save to Notebook, copy, download `.md`, or *Improve with AI* (your own key). All analysis runs on the device; only the video embed needs internet. Browsers cannot fetch YouTube transcripts directly (CORS), so the transcript is pasted or loaded from a file.

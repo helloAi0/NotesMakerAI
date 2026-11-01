@@ -1,4 +1,4 @@
-// E2E: reading aloud never scrolls the app frame (ribbon stays visible); click-to-speak is off by default.
+// E2E: reading aloud never scrolls the app frame (ribbon stays visible); clicking a word reads from there (on by default).
 const { chromium } = await import('playwright');
 const BASE = process.env.BASE || 'http://127.0.0.1:5300';
 const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }); const pg = await (await b.newContext({ viewport: { width: 1300, height: 700 } })).newPage(); pg.setDefaultTimeout(8000);
@@ -7,9 +7,10 @@ await pg.addInitScript(() => { const q = []; window.__spoken = q; const synth = 
 await pg.goto(BASE + '/'); await pg.waitForTimeout(1000); await pg.click('[data-testid=nav-notebook]'); await pg.waitForTimeout(600);
 const tabTop = () => pg.locator('button:text-is("Voice")').first().evaluate(e => Math.round(e.getBoundingClientRect().top));
 const t0 = await tabTop();
-ok('click-to-speak off by default', await pg.evaluate(() => localStorage.getItem('nm_click_speak2') !== '1'));
-await pg.click('[data-seg="c-0"]', { position: { x: 20, y: 8 } }).catch(() => {}); await pg.waitForTimeout(400);
-ok('clicking text does not speak', (await pg.evaluate(() => window.__spoken.length)) === 0);
+await pg.click('[data-seg="c-0"]', { position: { x: 20, y: 8 } }); await pg.waitForTimeout(600);
+ok('clicking a word reads aloud', (await pg.evaluate(() => window.__spoken.length)) > 0);
+ok('ribbon still in place after click-read', (await tabTop()) === t0);
+await pg.evaluate(() => window.speechSynthesis.cancel());
 await pg.click('button:text-is("Voice")'); await pg.click('button:has-text("Page")'); await pg.waitForTimeout(1500);
 ok('ribbon tabs stay in place while reading', (await tabTop()) === t0, `${t0} -> ${await tabTop()}`);
 await pg.evaluate(() => window.speechSynthesis.cancel());

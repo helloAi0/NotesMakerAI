@@ -91,6 +91,7 @@ const VIEWS: [ViewId, RegExp][] = [
   ['dashboard', /^(dashboard|home( page)?|main( menu| page)?)$/],
   ['friday', /^(friday|friday chat|chat( with friday)?|ai assistant|study assistant|assistant( chat)?|chat ?bot)$/],
   ['planner', /^(study )?(planner|plan|schedule|tasks|to ?do( list)?)$/],
+  ['lecture', /^(lecture( to notes)?|youtube( lecture)?|lecture notes|video notes)$/],
   ['generator', /^(ai )?(note )?generator|ai note generator$/],
 ];
 export function viewFromName(name: string): ViewId | null {

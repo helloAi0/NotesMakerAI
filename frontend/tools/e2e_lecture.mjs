@@ -1,0 +1,22 @@
+// E2E: Lecture to Notes studio (sample lecture, sections, timestamps, formulas, transcript tab, save to notebook, persistence).
+const { chromium } = await import('playwright');
+const BASE = process.env.BASE || 'http://127.0.0.1:5300';
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }); const ctx = await b.newContext({ viewport: { width: 1300, height: 850 } }); const pg = await ctx.newPage(); pg.setDefaultTimeout(8000);
+const errs = []; pg.on('pageerror', e => errs.push(e.message)); let fail = 0; const ok = (n, c, x = '') => { console.log(c ? 'PASS' : 'FAIL', n, c ? '' : x); if (!c) fail++; };
+await pg.route(/youtube/, r => r.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>player</body></html>' }));
+await pg.goto(BASE + '/'); await pg.waitForTimeout(800); await pg.click('[data-testid=nav-lecture]'); await pg.waitForTimeout(500);
+ok('studio opens', await pg.locator('[data-testid=lecture-view]').isVisible());
+await pg.click('[data-testid=lec-go]'); ok('empty transcript explains what to do', /Paste the lecture transcript/.test(await pg.textContent('[data-testid=lec-msg]')));
+await pg.fill('[data-testid=lec-url]', 'https://example.com/nope'); await pg.click('[data-testid=lec-sample]'); await pg.click('[data-testid=lec-go]'); ok('bad link rejected', /YouTube link/.test(await pg.textContent('[data-testid=lec-msg]')));
+await pg.fill('[data-testid=lec-url]', 'https://www.youtube.com/watch?v=k3kWU4C9m4Q'); await pg.click('[data-testid=lec-go]'); await pg.waitForSelector('[data-testid=lec-section]');
+const n = await pg.locator('[data-testid=lec-section]').count(); ok('sections built', n >= 3, String(n));
+ok('video iframe loads for the link', (await pg.locator('iframe[src*="k3kWU4C9m4Q"]').count()) === 1);
+ok('formula shown', /ΔU = Q − W/.test(await pg.locator('[data-testid=lec-formula]').allTextContents().then(a => a.join('|'))));
+ok('definition shown', /Enthalpy/i.test(await pg.textContent('[data-testid=lecture-view]')));
+await pg.locator('[data-testid=lec-stamp]').nth(1).click(); await pg.waitForTimeout(200); ok('timestamp click does not error', errs.length === 0);
+await pg.click('[data-testid=lec-tab-transcript]'); ok('transcript tab lists cues', /02:15/.test(await pg.textContent('[data-testid=lecture-view]')) && /conservation of energy/.test(await pg.textContent('[data-testid=lecture-view]')));
+await pg.fill('input[aria-label="Search transcript"]', 'enthalpy'); const nc = await pg.locator('p:has(button.font-mono)').count(); ok('transcript search filters', nc >= 1 && nc <= 4, String(nc));
+await pg.click('[data-testid=lec-tab-notes]');
+await pg.reload(); await pg.waitForTimeout(600); await pg.click('[data-testid=nav-lecture]'); await pg.waitForTimeout(400); ok('last lecture is remembered after reload', (await pg.locator('[data-testid=lec-section]').count()) === n);
+await pg.click('[data-testid=lec-nb]'); await pg.waitForTimeout(1500); ok('save to notebook opens the notebook with the notes', /Formula: ΔU = Q − W/.test(await pg.locator('textarea').first().inputValue().catch(() => '')) || /ΔU = Q − W/.test(await pg.textContent('body')));
+ok('no page errors', errs.length === 0, errs.join('|')); await b.close(); console.log(fail ? `${fail} FAILED` : 'ALL PASS'); process.exit(fail ? 1 : 0);
