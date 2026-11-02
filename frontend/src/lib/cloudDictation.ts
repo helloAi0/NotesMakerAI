@@ -83,6 +83,7 @@ export class CloudDictationController {
 
   async start() {
     if (this.state === 'listening' || this.state === 'starting') return;
+    if (this.state === 'paused') { this.resume(); return; } // never open a second microphone on top of the paused one
     const ok = canTranscribe(this.getCfg()); if (!ok.ok) { this.cb.onError?.(ok.why!, 'no-key'); return; }
     if (!window.isSecureContext) { this.cb.onError?.('The microphone only works on https:// or http://localhost.', 'insecure'); return; }
     this.setState('starting'); this.stopping = false; this.abort = new AbortController();

@@ -8,6 +8,7 @@ import RichText from './RichText';
 import MarkdownView from './MarkdownView';
 import EquationDictation from './EquationDictation';
 import { useReader, useDictation, applyVoiceCommands, SPEECH_LANGS } from '../lib/useVoice';
+import { joinChunk } from '../lib/dictationJoin';
 import { splitSentences, type SpeechSegment } from '../lib/speechUtils';
 import { caretAtPoint, domTokenIndex, sliceFromToken, pointOnWord } from '../lib/clickSpeak';
 import type { OcrWord } from '../lib/ocr';
@@ -440,6 +441,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     });
   };
   const setQuiet = (page: number, v: string) => { applyingText.current = true; try { setNotesFor(page, v); } finally { applyingText.current = false; } }; // live preview edits stay out of the undo history
+  const dictLangRef = useRef('en-US');
   const dict = useDictation(text => {
     // While dictating, an utterance that starts with a wake word ("computer, open the Kalman filter") is a command, not note text.
     const rng = interimRng.current; interimRng.current = null;
@@ -448,8 +450,9 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
       setQuiet(page, cur.slice(0, rng.start) + cur.slice(rng.end)); caretRef.current = rng.start;
     }
     if (looksLikeCommand(text)) { void import('../lib/agentRuntime').then(m => m.runCommand(text)); return; }
-    insertAtCaret('', before => applyVoiceCommands(text, before.slice(-1)));
+    insertAtCaret('', before => applyVoiceCommands(joinChunk(before, text, dictLangRef.current), before.slice(-1)));
   });
+  dictLangRef.current = dict.lang;
   // Stream the words being recognised straight into the editor as they are spoken (replaced by the formatted final text).
   useEffect(() => {
     const live = dict.interim.trim();
@@ -783,8 +786,9 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                   </>
                 ) : dict.state === 'paused' ? (
                   <>
-                    <button onClick={dict.resume} className="px-2 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Mic className="w-3.5 h-3.5"/> Resume</button>
-                    <button onClick={dict.cancel} className="px-2 py-1.5 rounded bg-slate-200 font-semibold">Cancel</button>
+                    <button onClick={dict.resume} data-testid="dict-resume" className="px-2 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Mic className="w-3.5 h-3.5"/> Resume</button>
+                    <button onClick={dict.stop} data-testid="dict-stop-paused" className="px-2 py-1.5 rounded bg-red-600 text-white font-semibold flex items-center gap-1"><StopSquare className="w-3.5 h-3.5"/> Stop</button>
+                    <span className="text-amber-700">‖ paused</span>
                   </>
                 ) : (
                   <button onClick={startDictation} className="px-3 py-1.5 rounded bg-amber-600 text-white font-semibold flex items-center gap-1"><Mic className="w-3.5 h-3.5"/> Start dictation</button>
@@ -969,7 +973,9 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                     />
                     {dict.interim && <p className="text-xs text-slate-500 italic mt-1">Hearing: {dict.interim}</p>}
                     <div className="mt-2 flex flex-wrap items-center gap-2" data-testid="edit-pane-controls">
-                      {dict.state === 'listening' || dict.state === 'starting'
+                      {dict.state === 'paused'
+                        ? <><button data-testid="edit-dictate" onClick={dict.resume} aria-label="Resume dictation" className="text-xs font-semibold px-3 py-1.5 rounded bg-amber-600 text-white flex items-center gap-1"><Mic className="w-3.5 h-3.5" /> Resume dictation</button><button data-testid="edit-dictate-stop" onClick={dict.stop} className="text-xs font-semibold px-3 py-1.5 rounded bg-red-600 text-white">Stop</button></>
+                        : dict.state === 'listening' || dict.state === 'starting'
                         ? <button data-testid="edit-dictate" onClick={dict.stop} aria-label="Stop Speech-to-Text Dictation" className="text-xs font-semibold px-3 py-1.5 rounded bg-red-600 text-white flex items-center gap-1 animate-pulse"><Mic className="w-3.5 h-3.5" /> Stop dictation</button>
                         : <button data-testid="edit-dictate" onClick={startDictation} disabled={!dict.supported} title={dict.supported ? 'Speak: text is typed at the cursor as you talk' : 'Speech recognition needs Chrome or Edge'} aria-label="Speech-to-Text Dictation" className="text-xs font-semibold px-3 py-1.5 rounded bg-amber-600 text-white flex items-center gap-1 disabled:opacity-40"><Mic className="w-3.5 h-3.5" /> Speech-to-Text Dictation</button>}
                       <button data-testid="edit-read-page" onClick={playPage} className="text-xs font-semibold px-3 py-1.5 rounded bg-slate-100 border flex items-center gap-1"><Play className="w-3.5 h-3.5" /> Read Page</button>

@@ -5,7 +5,7 @@ let clock = 1000; const realNow = performance.now.bind(performance); void realNo
 let proc: any = null; let reqs: { t: number }[] = []; let latency = 0; let nextText = 'hello world';
 class FakeAC { sampleRate = 16000; destination = {}; async resume() {} async close() {} createMediaStreamSource() { return { connect() {}, disconnect() {} }; } createScriptProcessor() { proc = { connect() {}, disconnect() {}, onaudioprocess: null as any }; return proc; } createGain() { return { gain: { value: 1 }, connect() {}, disconnect() {} }; } }
 (globalThis as any).window = { isSecureContext: true, AudioContext: FakeAC };
-Object.defineProperty(globalThis, 'navigator', { value: { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } }, configurable: true });
+let gum = 0; Object.defineProperty(globalThis, 'navigator', { value: { mediaDevices: { getUserMedia: async () => { gum++; return { getTracks: () => [{ stop() {} }] }; } } }, configurable: true });
 Object.defineProperty(globalThis, 'localStorage', { value: { getItem: () => null, setItem() {}, removeItem() {} }, configurable: true });
 (globalThis as any).FormData = class { append() {} }; (globalThis as any).Blob = class {};
 (globalThis as any).fetch = async () => { reqs.push({ t: clock }); const txt = nextText; await new Promise(r => setTimeout(r, latency)); return { ok: true, status: 200, json: async () => ({ text: txt }), text: async () => '' }; };
@@ -37,4 +37,5 @@ await run('Stop while speaking keeps the phrase', async (c, got) => {
 });
 await run('silence and a quick cough produce nothing', async (c, got) => { latency = 5; await feed(0, 10); await feed(0.3, 1); await feed(0, 8); await new Promise(r => setTimeout(r, 60)); assert.deepEqual(got.fin, []); });
 await run('hallucinated "Thank you." is dropped', async (c, got) => { latency = 5; nextText = 'Thank you.'; await feed(0.3, 8); await feed(0, 6); await new Promise(r => setTimeout(r, 80)); assert.deepEqual(got.fin, []); });
+await run('start() while paused resumes, it does not open a second microphone', async (c) => { const before = gum; await feed(0.3, 3); c.pause(); await c.start(); assert.equal(gum, before, 'getUserMedia not called again'); assert.equal(c.status, 'listening'); });
 console.log('cloud dictation OK'); process.exit(0);

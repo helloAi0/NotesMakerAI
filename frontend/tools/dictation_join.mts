@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+const { joinChunk: j } = await import('../src/lib/dictationJoin.ts');
+assert.equal(j('Hey, I was saying that', 'Hey, you can see'), 'hey, you can see');
+assert.equal(j('hello you can see', 'Can you hear me?'), 'can you hear me?');
+assert.equal(j('Done.', 'Can you hear me?'), 'Can you hear me?', 'new sentence keeps its capital');
+assert.equal(j('', 'Hello there'), 'Hello there'); assert.equal(j('line one\n', 'The next line'), 'The next line');
+assert.equal(j('we went to', 'London for a week'), 'London for a week', 'names are never lower-cased');
+assert.equal(j('and then', "I think so"), "I think so"); assert.equal(j('and then', "I'm sure"), "I'm sure");
+assert.equal(j('so the answer is', 'The mass'), 'the mass');
+assert.equal(j('wir gehen', 'Die Schule'), 'Die Schule', 'other languages untouched'); assert.equal(j('hallo', 'The end', 'de-DE'), 'The end');
+assert.equal(j('and', ' Hey you'), ' hey you'); assert.equal(j('what?', 'So yes'), 'So yes'); assert.equal(j('end of list:', 'Item'), 'Item');
+console.log('dictation join OK');
