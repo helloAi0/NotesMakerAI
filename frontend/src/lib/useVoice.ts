@@ -25,7 +25,7 @@ export function useReader() {
       onState: setState,
       onSegment: (i, s) => { setIndex(i); setSegId(s.id); segIdCb.current?.(s.id); },
       onEnd: () => { setIndex(-1); setSegId(''); },
-      onError: setError,
+      onError: m => { setError(m); setIndex(-1); setSegId(''); },
     });
     const load = () => setVoices(eng.getVoices());
     load();
@@ -44,6 +44,7 @@ export function useReader() {
     setPitch: (p: number) => { setPitchState(p); eng.setPitch(p); },
     setVoice: (n: string) => { setVoiceName(n); eng.setVoice(n); },
     setLang: (l: string) => { setLangState(l); eng.setLang(l); },
+    testVoice: () => eng.diagnose(),
     clearError: () => setError(''),
   };
 }

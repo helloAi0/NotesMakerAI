@@ -2,11 +2,13 @@ import { useMemo, useState } from 'react';
 import { groupVoices, TONE_PRESETS } from '../lib/voiceProfiles';
 import { SPEECH_LANGS } from '../lib/useVoice';
 
-interface Reader { voices: SpeechSynthesisVoice[]; voiceName: string; rate: number; pitch: number; lang: string; setVoice: (n: string) => void; setRate: (r: number) => void; setPitch: (p: number) => void; setLang: (l: string) => void }
+interface Reader { voices: SpeechSynthesisVoice[]; voiceName: string; rate: number; pitch: number; lang: string; setVoice: (n: string) => void; setRate: (r: number) => void; setPitch: (p: number) => void; setLang: (l: string) => void; testVoice?: () => Promise<{ voices: number; local: number; started: boolean; ms: number; error: string }> }
 
 /** Voice customization: accent-grouped voice list with gender, speed, pitch and tone presets. */
 export default function VoicePicker({ reader }: { reader: Reader }) {
   const [offlineOnly, setOfflineOnly] = useState(true);
+  const [diag, setDiag] = useState(''); const [testing, setTesting] = useState(false);
+  const runTest = async () => { if (!reader.testVoice) return; setTesting(true); setDiag(''); const r = await reader.testVoice(); setTesting(false); setDiag(r.started ? `Voice started after ${r.ms} ms. ${r.voices} voices found (${r.local} installed on this computer). If you heard nothing, check the Windows volume mixer and the output device.` : `The browser did not speak (${r.error}). ${r.voices} voices found, ${r.local} installed on this computer. ${r.local === 0 ? 'No offline voice is installed: add one in Windows Settings → Time & language → Speech, or use an online voice while connected to the internet.' : 'Pick an offline voice in the list, or restart the browser.'}`); };
   const [gender, setGender] = useState<'Any' | 'Female' | 'Male'>('Any');
   const groups = useMemo(() => groupVoices(reader.voices, { offlineOnly, gender }), [reader.voices, offlineOnly, gender]);
   const total = groups.reduce((n, [, v]) => n + v.length, 0);
@@ -33,6 +35,8 @@ export default function VoicePicker({ reader }: { reader: Reader }) {
       <label className="flex items-center gap-1">Speed <input type="range" min={0.5} max={2} step={0.05} value={reader.rate} onChange={e => reader.setRate(Number(e.target.value))} className="w-20" aria-label="Speed" /> {reader.rate.toFixed(2)}×</label>
       <label className="flex items-center gap-1">Pitch <input type="range" min={0.5} max={1.8} step={0.05} value={reader.pitch} onChange={e => reader.setPitch(Number(e.target.value))} className="w-20" aria-label="Pitch" /> {reader.pitch.toFixed(2)}</label>
       <label className="flex items-center gap-1 cursor-pointer" title="Offline voices are installed on your computer and work without internet. Online voices (marked) need a connection."><input type="checkbox" checked={offlineOnly} onChange={e => setOfflineOnly(e.target.checked)} /> Offline voices only</label>
+      {reader.testVoice && <button type="button" data-testid="voice-test" onClick={() => void runTest()} disabled={testing} className="px-2 py-1 rounded bg-amber-600 text-white font-semibold disabled:opacity-50">{testing ? 'Testing…' : 'Test voice'}</button>}
+      {diag && <p data-testid="voice-diag" role="status" className="basis-full text-[11px] text-slate-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">{diag}</p>}
       <span className="text-[11px] text-slate-500">{total} voice{total === 1 ? '' : 's'} available on this device</span>
     </div>
   );

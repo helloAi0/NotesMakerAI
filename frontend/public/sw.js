@@ -13,6 +13,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const r = e.request;
   if (r.method !== 'GET' || new URL(r.url).origin !== self.location.origin) return; // never touch remote AI calls
+  if (new URL(r.url).pathname.includes('/api/')) return; // live server data (YouTube captions) is never cached
   if (r.mode === 'navigate') { // page: network first (fresh), cached shell when offline
     e.respondWith(fetch(r).then(res => { const cp = res.clone(); caches.open(CACHE).then(c => c.put('./', cp)); return res; }).catch(() => caches.match('./').then(h => h || caches.match('index.html'))));
     return;

@@ -14,7 +14,7 @@ const load = (): Stored => {
     const j = JSON.parse(localStorage.getItem(KEY) || '{}'); const url = String(j.url || ''), raw = String(j.raw || ''); let rawFor = String(j.rawFor || '');
     if (!rawFor && raw.trim() === SAMPLE_TRANSCRIPT.trim()) rawFor = 'sample';
     // A transcript that belongs to another video than the link now in the box must not be used for it.
-    const id = youtubeId(url); if (rawFor === 'sample' && url.trim()) return { url, raw: '', rawFor: '' }; if (rawFor && rawFor !== 'sample' && id && id !== rawFor) return { url, raw: '', rawFor: '' };
+    const id = youtubeId(url); if (rawFor === 'sample' && url.trim()) return { url, raw: '', rawFor: '' }; if (rawFor && rawFor !== 'sample' && id && id !== idOf(rawFor)) return { url, raw: '', rawFor: '' };
     return { url, raw, rawFor };
   } catch { return { url: '', raw: '', rawFor: '' }; }
 };
@@ -24,7 +24,12 @@ const load = (): Stored => {
  * timestamped sections, summaries, formulas, definitions and key terms. Everything is computed on this device;
  * an AI key (optional) rewrites the sections. Clicking a timestamp seeks the embedded video.
  */
-const withSource = (n: LectureNotes, rawFor: string): LectureNotes => ({ ...n, source: rawFor === 'sample' ? 'Built-in sample lecture (not linked to any video)' : rawFor ? 'Transcript read from the video by Gemini' : 'Transcript you pasted or loaded' });
+const withSource = (n: LectureNotes, rawFor: string): LectureNotes => ({ ...n, source: rawFor === 'sample' ? 'Built-in sample lecture (not linked to any video)' : rawFor ? (rawFor.startsWith('cc:') ? 'YouTube captions fetched from the link' : 'Transcript read from the video by Gemini') : 'Transcript you pasted or loaded' });
+const idOf = (rawFor: string) => rawFor.replace(/^cc:/, '');
+/** Captions through the local dev server (fast). Returns null when the server cannot do it (static hosting, no captions, offline). */
+async function fetchCaptions(id: string, signal: AbortSignal): Promise<{ text: string } | { error: string } | null> {
+  try { const r = await fetch(`/api/yt-transcript?v=${id}`, { signal }); if (!/json/.test(r.headers.get('content-type') || '')) return null; const j = await r.json(); return j.ok ? { text: String(j.text) } : { error: String(j.error || 'No captions.') }; } catch { return null; }
+}
 
 export default function LectureNotesStudio() {
   const [init] = useState(load);
@@ -49,27 +54,36 @@ export default function LectureNotesStudio() {
   const listen = () => { try { frame.current?.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*'); } catch { /* ignore */ } };
   const seek = (sec: number) => { setPlay(sec); post('seekTo', [sec, true]); post('playVideo'); };
 
-  const gem = ai ? llmConfig() : null; const canRead = gem?.provider === 'gemini';
-  const build = (text: string, forId: string) => {
+    const build = (text: string, forId: string) => {
     const n = withSource(buildNotes(text, url), forId);
     if (!n.sections.length) { setMsg('I could not find any text in that transcript.'); return; }
     setNotes(n); setTab('notes'); setPlay(0); try { localStorage.setItem(KEY, JSON.stringify({ url, raw: text, rawFor: forId })); } catch { setMsg('Notes built, but this browser has no room left to remember them.'); return; }
     setMsg(`Built ${n.sections.length} section${n.sections.length > 1 ? 's' : ''} from ${n.cues.length} transcript lines${n.timed ? '' : ' (no timestamps found, so times are estimated at normal speaking speed)'}.`);
   };
+  const abortRef = useRef<AbortController | null>(null); const [secs, setSecs] = useState(0);
+  useEffect(() => { if (!busy) return; setSecs(0); const t = setInterval(() => setSecs(x => x + 1), 1000); return () => clearInterval(t); }, [busy]);
+  const cancel = () => { abortRef.current?.abort(); };
+  /** Link -> transcript. 1) YouTube captions through the local server (seconds). 2) Gemini watching the video (minutes for a long lecture). */
   const readVideo = async () => {
     const id = youtubeId(url); if (!id) { setMsg('Paste a YouTube link first.'); return; }
-    const cfg = llmConfig(); if (!cfg || cfg.provider !== 'gemini') { setMsg('Reading a video from its link needs a Gemini key (Settings → AI). Otherwise paste the transcript: on YouTube choose ⋯ More → Show transcript → copy.'); return; }
-    setBusy(true); setMsg('Gemini is watching the video and writing its transcript. This can take a minute for a long lecture…');
-    try { const t = await aiTranscribeVideo(cfg, id); setRaw(t); setRawFor(id); build(t, id); } catch (e) { setMsg((e as Error).message); } finally { setBusy(false); }
+    const ac = new AbortController(); abortRef.current = ac; setBusy(true); setMsg('Fetching the captions from YouTube…');
+    try {
+      const cc = await fetchCaptions(id, ac.signal);
+      if (cc && 'text' in cc) { setRaw(cc.text); setRawFor('cc:' + id); build(cc.text, 'cc:' + id); return; }
+      const cfg = llmConfig();
+      if (!cfg || cfg.provider !== 'gemini') { setMsg(`${cc && 'error' in cc ? cc.error + ' ' : cc === null ? 'Captions can only be fetched while running “npm run dev” with internet. ' : ''}Paste the transcript instead (YouTube: ⋯ More → Show transcript → copy), or add a Gemini key so Gemini can watch the video.`); return; }
+      setMsg(`${cc && 'error' in cc ? 'No captions were available. ' : ''}Gemini is watching the video and writing its transcript. A long lecture can take several minutes: you can cancel and paste the transcript instead.`);
+      const t = await aiTranscribeVideo(cfg, id, ac.signal); setRaw(t); setRawFor(id); build(t, id);
+    } catch (e) { setMsg(ac.signal.aborted ? 'Cancelled.' : (e as Error).message); } finally { setBusy(false); abortRef.current = null; }
   };
   const onUrl = (v: string) => {
     setUrl(v); const id = youtubeId(v);
-    if (v.trim() && raw.trim() && (rawFor === 'sample' || (rawFor && id && id !== rawFor))) { setRaw(''); setRawFor(''); setNotes(null); setMsg(rawFor === 'sample' ? 'Removed the sample transcript because you entered your own link. Paste that video’s transcript, or press “Read the video with AI”.' : 'Removed the old transcript because it belongs to a different video. Paste this video’s transcript, or press “Read the video with AI”.'); }
+    if (v.trim() && raw.trim() && (rawFor === 'sample' || (rawFor && id && id !== idOf(rawFor)))) { setRaw(''); setRawFor(''); setNotes(null); setMsg(rawFor === 'sample' ? 'Removed the sample transcript because you entered your own link. Paste that video’s transcript, or press “Read the video with AI”.' : 'Removed the old transcript because it belongs to a different video. Paste this video’s transcript, or press “Read the video with AI”.'); }
   };
   const generate = (e?: React.FormEvent) => {
     e?.preventDefault(); setMsg('');
     if (url.trim() && !youtubeId(url)) { setMsg('That does not look like a YouTube link. Paste a link such as https://www.youtube.com/watch?v=… (or leave it empty to work from the transcript only).'); return; }
-    if (!raw.trim()) { if (youtubeId(url) && canRead) { void readVideo(); return; } setMsg(youtubeId(url) ? 'The notes are made from the transcript, not from the link. Paste the transcript below (YouTube: ⋯ More → Show transcript → copy), load an .srt/.vtt file, or add a Gemini key to read the video automatically.' : 'Paste the lecture transcript below first. On YouTube: ⋯ (More) → Show transcript → select the text → copy. Or load an .srt / .vtt / .txt file.'); return; }
+    if (!raw.trim()) { if (youtubeId(url)) { void readVideo(); return; } setMsg(youtubeId(url) ? 'The notes are made from the transcript, not from the link. Paste the transcript below (YouTube: ⋯ More → Show transcript → copy), load an .srt/.vtt file, or press “Get transcript from link”.' : 'Paste the lecture transcript below first. On YouTube: ⋯ (More) → Show transcript → select the text → copy. Or load an .srt / .vtt / .txt file.'); return; }
     setBusy(true); touch('ask');
     setTimeout(() => { build(raw, rawFor); setBusy(false); }, 30);
   };
@@ -106,7 +120,8 @@ export default function LectureNotesStudio() {
             <textarea id="lec-raw" data-testid="lec-raw" value={raw} onChange={e => { setRaw(e.target.value); if (rawFor) setRawFor(''); }} rows={7} placeholder={'Paste the transcript here. Timestamps like 0:00, [02:15] or SRT/VTT are kept.\nOn YouTube: ⋯ More → Show transcript → copy.'} className="w-full px-3 py-2 text-xs font-mono bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 resize-y" />
             <div className="flex flex-wrap gap-2 items-center">
               <button data-testid="lec-go" type="submit" disabled={busy} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 disabled:opacity-50">{busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} Make notes</button>
-              {vid && <button type="button" data-testid="lec-read" onClick={() => void readVideo()} disabled={busy} title={canRead ? 'Gemini watches the public video and writes its transcript' : 'Needs a Gemini key in Settings'} className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1 ${canRead ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100' : 'border-slate-200 text-slate-400'}`}><Wand2 className="w-3.5 h-3.5" /> Read the video with AI</button>}
+              {vid && !busy && <button type="button" data-testid="lec-read" onClick={() => void readVideo()} title="Fetches YouTube's own captions (seconds). If there are none, Gemini can watch the video (slow)." className="px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1 border-red-300 text-red-700 bg-red-50 hover:bg-red-100"><Wand2 className="w-3.5 h-3.5" /> Get transcript from link</button>}
+              {busy && <button type="button" data-testid="lec-cancel" onClick={cancel} className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold hover:bg-slate-50">Cancel ({secs}s)</button>}
               <button type="button" onClick={() => fileRef.current?.click()} className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold flex items-center gap-1 hover:bg-slate-50"><Upload className="w-3.5 h-3.5" /> Load .srt / .vtt / .txt</button>
               <button type="button" data-testid="lec-sample" onClick={loadSample} className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold hover:bg-slate-50">Try a sample lecture</button>
               <input ref={fileRef} type="file" accept=".srt,.vtt,.txt,.md,text/plain" className="hidden" onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ''; }} />

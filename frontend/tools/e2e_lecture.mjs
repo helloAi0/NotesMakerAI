@@ -6,12 +6,14 @@ const errs = []; pg.on('pageerror', e => errs.push(e.message)); let fail = 0; co
 await pg.route(/youtube/, r => r.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>player</body></html>' }));
 let geminiBody = ''; const GERMAN = '[00:00] Hallo und willkommen zum Deutschkurs. Heute lernen wir das Alphabet und die Begrüßung.\n[00:20] Guten Morgen, guten Tag und guten Abend sind die wichtigsten Begrüßungen im Deutschen.\n[00:50] Wir lernen auch wie man sich vorstellt. Ich heiße Max und ich komme aus Deutschland.\n[01:30] Das Verb sein bedeutet to be. Ich bin, du bist, er ist.\n[02:10] Jetzt üben wir die Zahlen von eins bis zehn: eins, zwei, drei, vier, fünf.';
 await pg.route(/generativelanguage\.googleapis\.com/, async r => { geminiBody = r.request().postData() || ''; await r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ candidates: [{ content: { parts: [{ text: GERMAN }] } }] }) }); });
+let capMode = 'none'; let capHits = 0;
+await pg.route(/\/api\/yt-transcript/, async r => { capHits++; if (capMode === 'none') return r.fulfill({ status: 404, contentType: 'text/html', body: '<html>spa</html>' }); if (capMode === 'nocaps') return r.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'This video has no captions to read.' }) }); return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, text: GERMAN, lines: 5 }) }); });
 const text = () => pg.textContent('[data-testid=lecture-view]');
 await pg.goto(BASE + '/'); await pg.waitForTimeout(800); await pg.click('[data-testid=nav-lecture]'); await pg.waitForTimeout(500);
 ok('studio opens', await pg.locator('[data-testid=lecture-view]').isVisible());
 await pg.click('[data-testid=lec-go]'); ok('empty: explains what to do', /Paste the lecture transcript/.test(await pg.textContent('[data-testid=lec-msg]')));
 await pg.fill('[data-testid=lec-url]', 'https://example.com/nope'); await pg.click('[data-testid=lec-go]'); ok('bad link rejected', /YouTube link/.test(await pg.textContent('[data-testid=lec-msg]')));
-await pg.fill('[data-testid=lec-url]', 'https://youtu.be/mNX1wpIQ4Uk?si=4hMexBJHZgc_PJUx'); await pg.click('[data-testid=lec-go]'); ok('link alone: says notes come from the transcript (no key)', /not from the link/.test(await pg.textContent('[data-testid=lec-msg]')));
+await pg.fill('[data-testid=lec-url]', 'https://youtu.be/mNX1wpIQ4Uk?si=4hMexBJHZgc_PJUx'); await pg.click('[data-testid=lec-go]'); await pg.waitForFunction(() => /Paste the transcript/.test(document.querySelector('[data-testid=lec-msg]')?.textContent || '')); ok('link alone, no server captions, no key: tells the student to paste the transcript', true);
 ok('no video notes invented from a bare link', (await pg.locator('[data-testid=lec-section]').count()) === 0);
 await pg.fill('[data-testid=lec-url]', ''); await pg.click('[data-testid=lec-sample]'); await pg.click('[data-testid=lec-go]'); await pg.waitForSelector('[data-testid=lec-section]');
 ok('sample: sections built', (await pg.locator('[data-testid=lec-section]').count()) >= 3); ok('sample is labelled as a sample', /sample lecture/i.test(await pg.textContent('[data-testid=lec-source]')));
@@ -29,8 +31,15 @@ let t = await text(); ok('notes are about the pasted German lecture', /Begrüßu
 ok('source says pasted', /pasted/i.test(await pg.textContent('[data-testid=lec-source]'))); ok('video iframe is the linked video', (await pg.locator('iframe[src*="mNX1wpIQ4Uk"]').count()) === 1);
 // reload keeps the notes for the same link
 await pg.reload(); await pg.waitForTimeout(600); await pg.click('[data-testid=nav-lecture]'); await pg.waitForTimeout(400); ok('last lecture remembered after reload', (await pg.locator('[data-testid=lec-section]').count()) >= 1 && /Begrüßung|Deutsch|Zahlen/i.test(await text()));
-// Gemini reads the video from the link (mocked)
-await pg.click('button:has-text("New lecture")'); await pg.evaluate(() => { localStorage.setItem('ai_provider', 'gemini'); localStorage.setItem('ai_cfg_gemini', JSON.stringify({ apiKey: 'test-key-123', model: '', baseUrl: '' })); window.dispatchEvent(new Event('nm:settings')); });
+// captions fetched through the local server (fast path)
+await pg.click('button:has-text("New lecture")'); capMode = 'ok'; capHits = 0; geminiBody = '';
+await pg.fill('[data-testid=lec-url]', 'https://youtu.be/mNX1wpIQ4Uk'); await pg.click('[data-testid=lec-read]'); await pg.waitForSelector('[data-testid=lec-section]', { timeout: 8000 }).catch(async e => { console.log('DEBUG msg:', await pg.textContent('[data-testid=lec-msg]').catch(() => '(none)'), 'hits', capHits); throw e; });
+ok('captions: fetched from the server, Gemini not used', capHits === 1 && geminiBody === '', `hits ${capHits}`); ok('captions: source label', /captions fetched/i.test(await pg.textContent('[data-testid=lec-source]')));
+ok('captions: notes are about the video', /Begrüßung|Deutsch|Zahlen/i.test(await text()));
+await pg.reload(); await pg.waitForTimeout(600); await pg.click('[data-testid=nav-lecture]'); await pg.waitForTimeout(400); ok('captions notes survive a reload', (await pg.locator('[data-testid=lec-section]').count()) >= 1);
+// Gemini reads the video from the link (mocked) when the video has no captions
+capMode = 'nocaps';
+await pg.click('button:has-text("New lecture")'); geminiBody = ''; await pg.evaluate(() => { localStorage.setItem('ai_provider', 'gemini'); localStorage.setItem('ai_cfg_gemini', JSON.stringify({ apiKey: 'test-key-123', model: '', baseUrl: '' })); window.dispatchEvent(new Event('nm:settings')); });
 await pg.fill('[data-testid=lec-url]', 'https://www.youtube.com/watch?v=mNX1wpIQ4Uk'); await pg.click('[data-testid=lec-read]'); await pg.waitForSelector('[data-testid=lec-section]');
 ok('AI reading sends the video link to Gemini', /file_uri/.test(geminiBody) && /mNX1wpIQ4Uk/.test(geminiBody), geminiBody.slice(0, 200));
 ok('AI-read transcript becomes notes about the video', /Begrüßung|Deutsch|Zahlen|Hallo/i.test(await text()) && /read from the video by Gemini/.test(await pg.textContent('[data-testid=lec-source]')));

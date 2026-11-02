@@ -1,9 +1,13 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { mountTranscriptApi } from './server/ytTranscript.ts'
+
+// Serves GET /api/yt-transcript?v=<id> (YouTube captions) while running `npm run dev` or `vite preview`.
+const ytTranscript = () => ({ name: 'nm-yt-transcript', configureServer(s: { middlewares: Parameters<typeof mountTranscriptApi>[0] }) { mountTranscriptApi(s.middlewares) }, configurePreviewServer(s: { middlewares: Parameters<typeof mountTranscriptApi>[0] }) { mountTranscriptApi(s.middlewares) } })
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), ytTranscript()],
   build: {
     rolldownOptions: {
       output: {

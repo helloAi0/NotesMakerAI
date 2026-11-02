@@ -120,6 +120,25 @@ export class SpeechEngine {
 
   /** How long to wait for the browser to actually start talking before retrying / reporting. */
   startTimeoutMs = 2500;
+  private localVoice(): SpeechSynthesisVoice | null {
+    const vs = this.getVoices().filter(v => v.localService); if (!vs.length) return null; const l = (this.lang || (typeof navigator !== 'undefined' ? navigator.language : 'en')).toLowerCase().split('-')[0];
+    return vs.find(v => v.lang.toLowerCase().startsWith(l)) ?? vs[0];
+  }
+  /** Speak a short test phrase and report what the browser really did (used by the “Test voice” button). */
+  diagnose(): Promise<{ voices: number; local: number; started: boolean; ms: number; error: string }> {
+    const vs = this.getVoices(), base = { voices: vs.length, local: vs.filter(v => v.localService).length };
+    if (!this.synth) return Promise.resolve({ ...base, started: false, ms: 0, error: 'This browser has no speech synthesis.' });
+    this.hardStop(); const t0 = Date.now();
+    return new Promise(res => {
+      setTimeout(() => {
+        const u = new SpeechSynthesisUtterance('Voice test. If you can hear this, text to speech works.'); let done = false;
+        const fin = (started: boolean, error: string) => { if (done) return; done = true; clearTimeout(w); res({ ...base, started, ms: Date.now() - t0, error }); };
+        u.onstart = () => fin(true, ''); u.onboundary = () => fin(true, ''); u.onerror = e => fin(false, (e as SpeechSynthesisErrorEvent).error || 'unknown');
+        const w = setTimeout(() => fin(false, 'the browser never started speaking'), 4000);
+        if (this.synth!.paused) this.synth!.resume(); this.synth!.speak(u);
+      }, 120);
+    });
+  }
   private cancelledAt = 0;
   /** Chromium/Edge can silently drop a speak() issued right after cancel(), so every cancel is remembered and speak() waits it out. */
   private cancelNow() { this.cancelledAt = Date.now(); this.synth?.cancel(); }
@@ -130,14 +149,14 @@ export class SpeechEngine {
     if (!seg) { this.setState('idle'); this.cb.onEnd?.(); return; }
     const spoken = toSpeakableText(seg.text) || ' ';
     const u = new SpeechSynthesisUtterance(spoken);
-    // attempt 0 uses the chosen voice; the retry uses the browser's default voice for the language (a chosen online voice may be unreachable)
-    const voice = attempt === 0 ? this.pickVoice() : null;
+    // attempt 0: the chosen voice; attempt 1: the browser's default voice; attempt 2: a voice installed on this computer (online voices may be unreachable)
+    const voice = attempt === 0 ? this.pickVoice() : attempt === 1 ? null : this.localVoice();
     if (voice) { u.voice = voice; u.lang = voice.lang; } else if (this.lang) u.lang = this.lang;
     u.rate = this.rate; u.pitch = this.pitch; u.volume = this.volume;
     const myIndex = this.idx; let started = false; let wd: ReturnType<typeof setTimeout> | undefined;
     const failOrRetry = (why: string) => {
       if (session !== this.session || started) return; clearTimeout(wd);
-      if (attempt === 0) { this.cancelNow(); setTimeout(() => this.speakCurrent(session, 1), 120); return; }
+      if (attempt < 2 && (attempt === 0 || this.localVoice())) { this.cancelNow(); setTimeout(() => this.speakCurrent(session, attempt + 1), 120); return; }
       this.setState('idle');
       this.cb.onError?.(`No sound came out (${why}). Check the volume and the output device, open “Voice options” and pick another voice (one that is not marked Online), then click the text again.`);
     };

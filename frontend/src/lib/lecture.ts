@@ -276,10 +276,13 @@ That is all for today. Next time we will look at the second law and entropy.`;
 export async function aiTranscribeVideo(cfg: AiConfig, videoId: string, signal?: AbortSignal): Promise<string> {
   if (cfg.provider !== 'gemini') throw new Error('Reading a video from its link needs a Gemini key. Add one in Settings, or paste the transcript instead.');
   const prompt = 'Transcribe the speech in this video. Write one line every 10 to 20 seconds. Start each line with its time in square brackets, like [00:00] or [1:02:30], then the words spoken, in the language spoken. Output only these lines and nothing else. If there is no speech, output exactly: [no speech]';
-  const body = JSON.stringify({ contents: [{ role: 'user', parts: [{ file_data: { file_uri: `https://www.youtube.com/watch?v=${videoId}` } }, { text: prompt }] }] });
+  const contents = [{ role: 'user', parts: [{ file_data: { file_uri: `https://www.youtube.com/watch?v=${videoId}` } }, { text: prompt }] }];
+  // Speed: low video resolution (the words matter, not the picture) and no long "thinking". Plain body is the fallback when a model rejects those settings.
+  const fast = JSON.stringify({ contents, generationConfig: { mediaResolution: 'MEDIA_RESOLUTION_LOW', thinkingConfig: { thinkingLevel: 'minimal' } } }), plain = JSON.stringify({ contents });
   const base = 'https://generativelanguage.googleapis.com/v1beta'; let last = 'Gemini could not read this video.';
   for (const model of geminiModels({ ...cfg, speed: 'fast' })) {
-    const res = await fetch(`${base}/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body, signal });
+    const post = (body: string) => fetch(`${base}/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body, signal });
+    let res = await post(fast); if (res.status === 400) res = await post(plain);
     if (!res.ok) {
       const t = await res.text().catch(() => ''); let msg = t.slice(0, 240); try { msg = JSON.parse(t)?.error?.message || msg; } catch { /* keep raw */ }
       if (res.status === 429) throw new Error('Gemini says the rate limit is reached. Wait a minute and try again.');
