@@ -486,7 +486,22 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
     if (root && node) { const k = domTokenIndex(root, node, offset); if (k > 0) segs[i] = { ...segs[i], text: sliceFromToken(segs[i].text, k) }; }
     reader.playFrom(segs, i);
   };
-  const speakAtPoint = (id: string, el: HTMLElement, x: number, y: number) => { if (inputModeRef.current !== 'read') return; const c = caretAtPoint(x, y); if (!c || !el.contains(c.node) || !pointOnWord(c.node, c.offset, x, y)) return; /* only a click that lands ON a word speaks */ speakFrom(id, el, c.node, c.offset); };
+  const speakAtPoint = (id: string, el: HTMLElement, x: number, y: number) => {
+    if (inputModeRef.current !== 'read') return;
+    const at = (px: number, py: number) => { const c = caretAtPoint(px, py); return c && el.contains(c.node) && pointOnWord(c.node, c.offset, px, py) ? c : null; };
+    // A touch rarely lands exactly on the letters: between words, on the line's spare height or on the full stop still reads from the nearest word (right side first).
+    let c = at(x, y); if (!c) for (const d of [5, 10, 16, 24, 34, 48]) { c = at(x + d, y) ?? at(x - d, y); if (c) break; }
+    if (!c) { const r = el.getClientRects()[0]; if (r && Math.abs(y - (r.top + r.height / 2)) <= r.height) { speakFrom(id, el); } return; } // still nothing under the finger: read the whole sentence
+    speakFrom(id, el, c.node, c.offset);
+  };
+  /** A click on a line's blank height or margin (not on a sentence box) reads from the nearest word of that line. */
+  const speakNearest = (e: React.MouseEvent<HTMLElement>) => {
+    if ((e.target as HTMLElement).closest('[data-seg]')) return;
+    let best: { el: HTMLElement; id: string; r: DOMRect; d: number } | null = null;
+    e.currentTarget.querySelectorAll<HTMLElement>('[data-seg]').forEach(el => { for (const r of Array.from(el.getClientRects())) { const dx = e.clientX < r.left ? r.left - e.clientX : e.clientX > r.right ? e.clientX - r.right : 0, dy = e.clientY < r.top ? r.top - e.clientY : e.clientY > r.bottom ? e.clientY - r.bottom : 0, d = Math.hypot(dx, dy); if (!best || d < best.d) best = { el, id: el.getAttribute('data-seg')!, r, d }; } });
+    const b = best as { el: HTMLElement; id: string; r: DOMRect; d: number } | null; if (!b || b.d > 60) return;
+    speakAtPoint(b.id, b.el, Math.min(Math.max(e.clientX, b.r.left + 1), b.r.right - 1), b.r.top + b.r.height / 2);
+  };
   /** Highlighting text with the mouse/finger starts reading from the first highlighted word. */
   const speakFromSelection = () => {
     if (!clickSpeakRef.current || inputModeRef.current !== 'read') return;
@@ -919,7 +934,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
             <div className="p-6 pl-10 md:p-16 relative z-0 space-y-6 text-slate-900">
               <div className="border-b-2 border-slate-800/20 pb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight">{renderSent({ id: 't-0', text: activeTitle })}</h1>
+                  <h1 className="text-2xl md:text-3xl font-bold tracking-tight" onClick={speakNearest}>{renderSent({ id: 't-0', text: activeTitle })}</h1>
                   <p className="text-xs opacity-70 mt-1">Page {currentPage} of {totalPages}</p>
                 </div>
                 <button
@@ -932,8 +947,8 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
 
               <div className="space-y-6">
                 <div className="p-5 rounded-xl border-l-4 border-amber-600 bg-amber-500/10">
-                  <h3 className="font-bold text-lg">{headingS.map(renderSent)}</h3>
-                  <p className="text-base leading-relaxed">{contentS.map(renderSent)}</p>
+                  <h3 className="font-bold text-lg" onClick={speakNearest}>{headingS.map(renderSent)}</h3>
+                  <p className="text-base leading-relaxed" onClick={speakNearest}>{contentS.map(renderSent)}</p>
                 </div>
               </div>
 
@@ -968,7 +983,7 @@ export default function NotebookWorkspace({ notebookData }: NotebookWorkspacePro
                     {(pageTypedText[currentPage] || '').trim() === '' ? (
                       <button onClick={() => setInputMode('keyboard')} className="text-slate-400 italic">No notes yet. Click here to write, or dictate from the Voice tab.</button>
                     ) : noteLines.map((sents, li) => (
-                      <div key={li} className="px-1">{sents.length ? sents.map(renderSent) : '\u00A0'}</div>
+                      <div key={li} className="px-1" onClick={speakNearest}>{sents.length ? sents.map(renderSent) : '\u00A0'}</div>
                     ))}
                     {(pageTypedText[currentPage] || '').trim() !== '' && inputMode === 'read' && (
                       <button onClick={() => setInputMode('keyboard')} className="no-print mt-2 text-xs font-semibold px-3 py-1 rounded border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100">Edit notes</button>

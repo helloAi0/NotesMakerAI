@@ -141,7 +141,7 @@ export class SpeechEngine {
   }
   private cancelledAt = 0;
   /** Chromium/Edge can silently drop a speak() issued right after cancel(), so every cancel is remembered and speak() waits it out. */
-  private cancelNow() { this.cancelledAt = Date.now(); this.synth?.cancel(); }
+  private cancelNow() { const busy = !!this.synth && (this.synth.speaking || this.synth.pending || this.synth.paused); if (busy) this.cancelledAt = Date.now(); this.synth?.cancel(); }
   private speakCurrent(session: number, attempt = 0) {
     if (!this.synth || session !== this.session) return;
     const settle = 90 - (Date.now() - this.cancelledAt); if (settle > 0) { setTimeout(() => { if (session === this.session) this.speakCurrent(session, attempt); }, settle); return; }
