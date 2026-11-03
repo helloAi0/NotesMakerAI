@@ -10,9 +10,10 @@ import MarkdownView from './MarkdownView';
 import VoicePicker from './VoicePicker';
 import DictationEngine from './DictationEngine';
 import { FilesPanel, MemoryPanel, LearningPanel, MapPanel, BrainPanel } from './FridayPanels';
+import { AgentsPanel, TutorPanel, EvalsPanel } from './FridayAgentsPanels';
 
-type Tab = 'chat' | 'files' | 'memory' | 'learning' | 'map' | 'brain';
-const TABS: [Tab, string][] = [['chat', 'Chat'], ['files', 'Files'], ['memory', 'Memory'], ['learning', 'Learning'], ['map', 'Map'], ['brain', 'Brain']];
+type Tab = 'chat' | 'files' | 'memory' | 'learning' | 'map' | 'brain' | 'agents' | 'tutor' | 'evals';
+const TABS: [Tab, string][] = [['chat', 'Chat'], ['files', 'Files'], ['memory', 'Memory'], ['learning', 'Learning'], ['map', 'Map'], ['agents', 'Agents'], ['tutor', 'Tutor'], ['evals', 'Evals'], ['brain', 'Brain']];
 const SUGGEST = ['Go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report', 'Explain backpropagation step by step', 'Open AI segmentation -> go to the image processing module -> set model to U-Net -> run simulation', 'Derive the heat equation', 'Remember that my exam is on Friday', 'What can you do?'];
 const SPOKEN = SPEECH_LANGS.filter(l => ['en-US', 'en-IN', 'hi-IN', 'ar-SA', 'mr-IN', 'fr-FR', 'de-DE'].includes(l.code));
 const REASONS: [Reason, string][] = [['too_long', 'Too long'], ['too_short', 'Too short'], ['too_technical', 'Too technical'], ['too_simple', 'Too simple'], ['wrong', 'Incorrect']];
@@ -33,8 +34,9 @@ function Bubble({ m, busy, onSpeak, reader }: { m: Msg; busy: boolean; onSpeak: 
         {raw && <pre className="mt-2 text-[10px] bg-slate-900 text-emerald-200 p-2 rounded overflow-x-auto max-h-56">{planJson(m.plan)}</pre>}
       </div>}
       {m.text && !(m.plan && m.plan.steps.length === 1 && m.plan.steps[0].status !== 'pending' && m.text.trim() === (m.plan.steps[0].message ?? '').trim()) ? <div className={m.plan ? 'border-t pt-1 mt-1' : ''}><MarkdownView text={m.text} /></div> : m.streaming ? <div className="text-slate-500 text-xs flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> thinking…</div> : null}
+      {m.runId && !m.streaming && <button onClick={() => window.dispatchEvent(new CustomEvent('nm:friday-run', { detail: m.runId }))} className="text-[10px] text-amber-700 underline mt-1" data-testid="view-trace">View agent trace</button>}
       {m.sources && m.sources.length > 0 && <div className="text-[10px] text-slate-500 mt-1.5 flex flex-wrap gap-x-2 items-center"><BookOpen className="w-3 h-3" />{m.sources.map((s, i) => s.url ? <a key={i} href={s.url} target="_blank" rel="noreferrer" className="underline">{s.title}</a> : <span key={i}>{s.title}{s.where ? ` · ${s.where}` : ''}</span>)}</div>}
-      {m.chips && m.chips.length > 0 && <div className="flex flex-wrap gap-1.5 mt-2">{m.chips.map((c, i) => <button key={i} onClick={() => void runChip(c.cmd)} disabled={busy} className="px-2 py-1 rounded-full border border-amber-300 bg-amber-50 text-amber-900 text-[11px] hover:bg-amber-100 disabled:opacity-50">{c.label.length > 60 ? c.label.slice(0, 58) + '…' : c.label}</button>)}</div>}
+      {m.chips && m.chips.length > 0 && <div className="flex flex-wrap gap-1.5 mt-2">{m.chips.map((c, i) => <button key={i} onClick={() => void runChip(c.cmd)} disabled={busy && !c.cmd.startsWith("__confirm__")} className="px-2 py-1 rounded-full border border-amber-300 bg-amber-50 text-amber-900 text-[11px] hover:bg-amber-100 disabled:opacity-50">{c.label.length > 60 ? c.label.slice(0, 58) + '…' : c.label}</button>)}</div>}
       {m.strategy && !m.streaming && m.text && <div className="mt-2 flex items-center gap-1 flex-wrap text-[11px] text-slate-500">
         <button aria-label="Good answer" title="Good answer: teach FRIDAY" onClick={() => feedback(m.id, 'up')} className={`p-1 rounded hover:bg-slate-100 ${m.feedback === 'up' ? 'text-emerald-600' : ''}`}><ThumbsUp className="w-3.5 h-3.5" /></button>
         <button aria-label="Bad answer" title="Bad answer: teach FRIDAY" onClick={() => { feedback(m.id, 'down'); setWhy(true); }} className={`p-1 rounded hover:bg-slate-100 ${m.feedback === 'down' ? 'text-red-600' : ''}`}><ThumbsDown className="w-3.5 h-3.5" /></button>
@@ -52,7 +54,7 @@ function Bubble({ m, busy, onSpeak, reader }: { m: Msg; busy: boolean; onSpeak: 
 /** The one FRIDAY. Used by the floating dock (variant "dock") and the full page (variant "page"). */
 export default function FridayConsole({ variant, prefix, onClose }: { variant: 'dock' | 'page'; prefix: string; onClose?: () => void }) {
   const all = useSyncExternalStore(subscribe, getMsgs); const busy = useSyncExternalStore(subscribe, isBusy); const pipe = useSyncExternalStore(subscribe, getPipe);
-  const [tab, setTab] = useState<Tab>('chat'); const [text, setText] = useState(''); const [showVoice, setShowVoice] = useState(false); const [openPath, setOpenPath] = useState<string | undefined>();
+  const [focusRun, setFocusRun] = useState<string | undefined>(); const [tab, setTab] = useState<Tab>('chat'); const [text, setText] = useState(''); const [showVoice, setShowVoice] = useState(false); const [openPath, setOpenPath] = useState<string | undefined>();
   const [speak, setSpeak] = useState(() => { try { return localStorage.getItem('nm_assistant_speak') === '1'; } catch { return false; } });
   const [hands, setHands] = useState(false); const [engine, setEngine] = useState('…'); const [online, setOnline] = useState(router.isOnline()); const [, bump] = useState(0);
   const reader = useReader(); const logRef = useRef<HTMLDivElement>(null); const speakRef = useRef(speak); speakRef.current = speak; const handsRef = useRef(hands); handsRef.current = hands;
@@ -62,6 +64,8 @@ export default function FridayConsole({ variant, prefix, onClose }: { variant: '
   const refreshEngine = useCallback(() => { void router.current().then(c => setEngine(c.label)); setOnline(router.isOnline()); bump(x => x + 1); }, []);
   useEffect(() => { refreshEngine(); }, [refreshEngine]);
   useEffect(() => onReply((m: Msg) => { if (m.who === 'bot' && m.text && (speakRef.current || handsRef.current) && reader.supported) say(m); }), [reader, say]);
+  useEffect(() => { const h = (e: Event) => { setFocusRun((e as CustomEvent<string>).detail); setTab('agents'); }; window.addEventListener('nm:friday-run', h); return () => window.removeEventListener('nm:friday-run', h); }, []);
+  useEffect(() => { const h = (e: Event) => { const t = (e as CustomEvent<string>).detail as Tab; if (TABS.some(x => x[0] === t)) setTab(t); }; window.addEventListener('nm:friday-tab', h); return () => window.removeEventListener('nm:friday-tab', h); }, []);
   useEffect(() => { const h = (e: Event) => { setOpenPath((e as CustomEvent<string>).detail); setTab('files'); }; window.addEventListener('nm:friday-open-file', h); return () => window.removeEventListener('nm:friday-open-file', h); }, []);
   useEffect(() => { logRef.current?.scrollTo({ top: logRef.current.scrollHeight }); }, [all, pipe, tab]);
   useEffect(() => { try { localStorage.setItem('nm_assistant_speak', speak ? '1' : '0'); } catch { /* ignore */ } if (!speak && !hands) reader.stop(); }, [speak]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -100,7 +104,7 @@ export default function FridayConsole({ variant, prefix, onClose }: { variant: '
           <input data-testid={`${prefix}-input`} value={text} onChange={e => setText(e.target.value)} placeholder="Ask anything, or tell FRIDAY what to do…" className="flex-1 min-w-0 px-3 py-2 rounded-full border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
           <button data-testid={`${prefix}-send`} type="submit" disabled={busy || !text.trim()} aria-label="Send" className="p-2 rounded-full bg-amber-600 text-white disabled:opacity-40"><Send className="w-4 h-4" /></button>
         </form></>
-        : <div className="flex-1 min-h-0">{tab === 'files' ? <FilesPanel openPath={openPath} onOpened={() => setOpenPath(undefined)} /> : tab === 'memory' ? <MemoryPanel /> : tab === 'learning' ? <LearningPanel /> : tab === 'map' ? <MapPanel /> : <BrainPanel onChange={refreshEngine} />}</div>}
+        : <div className="flex-1 min-h-0">{tab === 'files' ? <FilesPanel openPath={openPath} onOpened={() => setOpenPath(undefined)} /> : tab === 'memory' ? <MemoryPanel /> : tab === 'learning' ? <LearningPanel /> : tab === 'map' ? <MapPanel /> : tab === 'agents' ? <AgentsPanel focusRun={focusRun} /> : tab === 'tutor' ? <TutorPanel /> : tab === 'evals' ? <EvalsPanel /> : <BrainPanel onChange={refreshEngine} />}</div>}
     </div>
   );
 }

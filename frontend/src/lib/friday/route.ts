@@ -9,6 +9,8 @@
 import { generate } from '../aiClient';
 import type { AiConfig, GenOpts } from '../aiClient';
 import { llmConfig } from '../friday';
+import { pickTiers } from './agents/tiers';
+import type { Tier } from './agents/tiers';
 
 export type RoutePref = 'auto' | 'local' | 'cloud' | 'offline';
 export type Engine = 'local' | 'cloud' | 'offline';
@@ -45,8 +47,13 @@ export async function detectLocal(extra?: string): Promise<Found[]> {
     if (p.kind === 'ollama') { const j = (await fetchJson(`${p.url}/api/tags`)) as { models?: { name: string }[] }; const key = p.url.replace('127.0.0.1', 'localhost'); if (seen.has(key)) return; seen.add(key); out.push({ kind: 'ollama', url: p.url, models: (j.models ?? []).map(m => m.name) }); }
     else { const j = (await fetchJson(`${p.url}/v1/models`)) as { data?: { id: string }[] }; out.push({ kind: 'openai', url: p.url, models: (j.data ?? []).map(m => m.id) }); }
   } catch { /* not running */ } }));
+  const all = [...new Set(out.flatMap(f => f.models))]; if (all.length) set('nm_friday_models', JSON.stringify(all));
   return out;
 }
+/** Installed local models remembered from the last scan, and the small/large pair derived from them (null when only one size exists). */
+export function knownModels(): string[] { try { const a = JSON.parse(get('nm_friday_models') || '[]'); return Array.isArray(a) ? a.map(String) : []; } catch { return []; } }
+export function localTiers(): { small: string; big: string } | null { const u = get('nm_friday_small'), b = get('nm_friday_big'); if (u && b) return { small: u, big: b }; return pickTiers(knownModels()); }
+export const setTiers = (small: string, big: string) => { set('nm_friday_small', small); set('nm_friday_big', big); };
 /** Pick the best model name from an installed list (prefers instruct/chat models of a useful size). */
 export function pickModel(models: string[]): string {
   const rank = (m: string) => { const l = m.toLowerCase(); let s = 0; if (/instruct|chat|it\b/.test(l)) s += 2; if (/llama3|llama-3|qwen|mistral|gemma|phi|deepseek|gpt-oss/.test(l)) s += 3; if (/embed|nomic|bge|minilm|whisper|clip|vision-only/.test(l)) s -= 10; const sz = l.match(/(\d+(?:\.\d+)?)b\b/); if (sz) { const b = +sz[1]; s += b >= 7 && b <= 34 ? 3 : b >= 3 ? 2 : 0; } return s; };
@@ -73,11 +80,13 @@ export async function current(): Promise<Resolved> { return (await plan()).order
 
 export interface Gen { text: string; engine: Engine; label: string; note?: string }
 /** Run a prompt through the first engine that works. Returns null when only the offline engine remains (caller composes the answer itself). */
-export async function route(prompt: string, opts: GenOpts = {}): Promise<Gen | null> {
-  const { order } = await plan(); let note = '';
+export async function route(prompt: string, opts: GenOpts & { tier?: Tier } = {}): Promise<Gen | null> {
+  const { order } = await plan(); let note = ''; const { tier, ...gopts } = opts;
   for (const r of order) {
     if (r.engine === 'offline' || !r.cfg) break;
-    try { const text = await generate(r.cfg, prompt, { retries: 0, timeoutMs: r.engine === 'local' ? 120_000 : 45_000, maxTokens: 1400, ...opts }); if (text.trim()) return { text: text.trim(), engine: r.engine, label: r.label, note: note || undefined }; note = `${r.label} returned nothing`; }
+    let cfg = r.cfg, label = r.label;
+    if (tier) { if (r.engine === 'local') { const t = localTiers(); if (t) { cfg = { ...cfg, model: tier === 'fast' ? t.small : t.big }; label = `Local model · ${cfg.model} (${tier})`; } } else if (r.engine === 'cloud') cfg = { ...cfg, speed: tier === 'fast' ? 'fast' : 'quality' }; }
+    try { const text = await generate(cfg, prompt, { retries: 0, timeoutMs: r.engine === 'local' ? 120_000 : 45_000, maxTokens: 1400, ...gopts }); if (text.trim()) return { text: text.trim(), engine: r.engine, label, note: note || undefined }; note = `${r.label} returned nothing`; }
     catch (e) { note = `${r.label} failed (${(e as Error).message.slice(0, 90)})`; if (r.engine === 'local') localHealth = { ok: false, at: Date.now() }; }
   }
   return note ? { text: '', engine: 'offline', label: 'Offline engine', note } : null;

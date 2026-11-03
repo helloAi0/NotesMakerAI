@@ -317,6 +317,7 @@ export interface GenOpts {
   retries?: number;
   maxModels?: number;
   maxTokens?: number;
+  temperature?: number;          // sampling temperature (used for sample-and-agree verification)
   stream?: boolean;              // default true
   onText?: (soFar: string) => void;
   log?: (line: string) => void;
@@ -369,6 +370,7 @@ async function geminiCall(
   const generationConfig: Record<string, unknown> = {};
   if (o.json) generationConfig.responseMimeType = 'application/json';
   if (o.maxTokens) generationConfig.maxOutputTokens = o.maxTokens;
+  if (o.temperature !== undefined) generationConfig.temperature = o.temperature;
   if (thinking) generationConfig.thinkingConfig = { thinkingLevel: thinking };
 
   const body = {
@@ -499,7 +501,7 @@ async function openaiCall(cfg: AiConfig, model: string, prompt: string, o: GenOp
   messages.push({ role: 'user', content: prompt });
 
   const extras = useExtras && cfg.provider === 'openai' && !noExtras.has(model) ? { reasoning_effort: 'low' } : {};
-  const body = { model, messages, ...(stream ? { stream: true } : {}), ...extras };
+  const body = { model, messages, ...(stream ? { stream: true } : {}), ...(o.temperature !== undefined && cfg.provider !== 'openai' ? { temperature: o.temperature } : {}), ...extras };
   const url = `${baseUrlOf(cfg)}/chat/completions`;
   const headers = { Authorization: `Bearer ${cfg.apiKey.trim()}` };
   const idleMs = o.timeoutMs ?? 45_000;
@@ -539,6 +541,7 @@ async function anthropicCall(cfg: AiConfig, model: string, prompt: string, o: Ge
   const body = {
     model,
     max_tokens: o.maxTokens ?? 8192,
+    ...(o.temperature !== undefined ? { temperature: Math.min(1, o.temperature) } : {}),
     messages: [{ role: 'user', content: prompt }],
     ...(o.json ? { system: JSON_ONLY } : {}),
     ...(stream ? { stream: true } : {}),

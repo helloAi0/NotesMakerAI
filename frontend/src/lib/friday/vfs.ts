@@ -145,6 +145,10 @@ export class VFS {
   }
   async writeBlob(path: string, blob: Blob, text = '', pages?: number): Promise<VNode> { return this.writeText(path, text, { blob, mime: blob.type || 'application/octet-stream', size: blob.size, pages }); }
   uniquePath(dir: string, name: string): string { let p = join(dir, name); if (!this.stat(p)) return p; const m = name.match(/^(.*?)(\.[^.]*)?$/)!; for (let i = 2; i < 1000; i++) { p = join(dir, `${m[1]} (${i})${m[2] ?? ''}`); if (!this.stat(p)) return p; } return p; }
+  /** Raw restore used by the undo journal: put these nodes back exactly as they were, delete these paths. */
+  async restore(puts: VNode[], dels: string[]): Promise<void> {
+    await this.ready(); for (const p of dels) { if (this.nodes.has(p)) { this.nodes.delete(p); await this.be.del(p); } } for (const n of puts) { this.nodes.set(n.path, n); await this.be.put(n); } this.emit();
+  }
   async remove(path: string, permanent = false): Promise<{ ok: boolean; message: string; path?: string }> {
     await this.ready(); const n = normPath(path); const node = this.stat(n); if (!node) return { ok: false, message: `${n} does not exist.` };
     if (n === '/' || DEFAULT_DIRS.includes(n) || n === LIB_ROOT) return { ok: false, message: `${n} is a system folder and cannot be deleted.` };

@@ -26,6 +26,10 @@ import type { Strategy, Ctx } from './learn';
 import { clusterCorpus, nearestCluster } from './cluster';
 import type { KnowledgeMap } from './cluster';
 import * as router from './route';
+import { buildDeps, deck, journal, reminders, runStore, agentsEnabled, setConfirmHandler } from './agentsRuntime';
+import { runAgents } from './agents/orchestrator';
+import { riskOf } from './agents/journal';
+import { planRules } from './agents/agents';
 import type { Engine, WebHit } from './route';
 
 export interface Chip { label: string; cmd: string }
@@ -35,7 +39,7 @@ export interface Msg {
   id: number; who: 'you' | 'bot'; text: string; t: number; via?: 'voice' | 'text';
   plan?: Plan; chips?: Chip[]; sources?: { kind: string; title: string; where?: string; url?: string }[];
   engine?: Engine; engineLabel?: string; strategy?: Strategy; ctx?: Ctx; confidence?: number; notes?: string[];
-  feedback?: 'up' | 'down'; streaming?: boolean; question?: string; pipe?: PipeNode[];
+  feedback?: 'up' | 'down'; streaming?: boolean; question?: string; pipe?: PipeNode[]; runId?: string;
 }
 const KEY = 'nm_friday_chat_v2';
 const NODE_LABELS: Record<NodeId, string> = { perceive: 'Perceive', plan: 'Plan', recall: 'Recall', reason: 'Reason', act: 'Act', critic: 'Critic', learn: 'Learn' };
@@ -110,6 +114,40 @@ async function modelPlan(goal: string): Promise<Plan | null> {
   try { return validatePlan(parseJsonLoose(r.text), goal); } catch { return null; }
 }
 
+/* ---------------- ask before risky steps, and undo ---------------- */
+let pendingConfirm: ((ok: boolean) => void) | null = null;
+export function askConfirm(why: string[]): Promise<boolean> {
+  return new Promise<boolean>(res => {
+    const id = add({ who: 'bot', text: `Before I do this, please confirm. It will: ${why.join('; ')}.`, chips: [{ label: 'Yes, do it', cmd: '__confirm__ yes' }, { label: 'No, cancel', cmd: '__confirm__ no' }] });
+    const finish = (ok: boolean) => { if (!pendingConfirm) return; pendingConfirm = null; patch(id, m => ({ ...m, chips: [], text: m.text + (ok ? '\n\nConfirmed.' : '\n\nCancelled. Nothing was changed.') })); res(ok); };
+    pendingConfirm = finish; setTimeout(() => { if (pendingConfirm === finish) finish(false); }, 120_000);
+  });
+}
+setConfirmHandler(askConfirm);
+export async function undoLast(): Promise<string> { const r = await journal.undo(); return r.message; }
+
+/* ---------------- multi-agent answer ---------------- */
+async function agentChat(q: string, ctxClass: Ctx, off: { chips: Chip[] }, opts: { regenOf?: number }) {
+  const strategy: Strategy = opts.regenOf ? (STRATEGIES.filter(s => s !== msgs.find(m => m.id === opts.regenOf)?.strategy)[Math.floor(Math.random() * (STRATEGIES.length - 1))]) : policy.pick(ctxClass);
+  const id = add({ who: 'bot', text: '', streaming: true, strategy, ctx: ctxClass, question: q });
+  node('plan', 'active', 'Planner'); node('recall', 'active');
+  const deps = buildDeps({ memory, persona: PERSONA, style: `${STRATEGY_STYLE[strategy]} ${policy.prefText()}`.trim() });
+  const cur = await router.current();
+  const res = await runAgents(q, deps, { onUpdate: (run, board) => {
+    const ts = board.all(); const names = (st: string) => ts.filter(t => t.status === st).map(t => t.agent); const workers = ts.filter(t => ['researcher', 'solver', 'simop', 'tutor'].includes(t.agent));
+    if (ts.length > 1) node('plan', 'done', `${ts.length - 1} agent step(s)`);
+    if (workers.length) { const run1 = workers.some(t => t.status === 'running'); node('recall', run1 ? 'active' : 'done', workers.map(t => t.agent).join(' + ')); node('reason', run1 ? 'active' : 'done', run1 ? 'working in parallel' : 'results ready'); }
+    const c = ts.find(t => t.agent === 'critic'); if (c) node('critic', c.status === 'running' ? 'active' : c.status === 'done' ? 'done' : 'idle', c.status === 'done' ? `confidence ${Math.round((c.confidence ?? 0) * 100)}%` : 'checking');
+    patch(id, m => ({ ...m, text: names('running').length ? `Working: ${names('running').join(' + ')}…` : m.text, runId: run.id }), false);
+  } });
+  runStore.add(res.run);
+  setLastOutput(res.text);
+  patch(id, m => ({ ...m, text: res.text, streaming: false, engine: cur.engine, engineLabel: `${cur.label} · agents`, confidence: res.confidence, runId: res.run.id,
+    notes: res.flags.slice(0, 4), sources: res.citations.slice(0, 6).map(c => ({ kind: c.kind, title: c.title, where: c.where })),
+    chips: [...(res.journalId ? [{ label: 'Undo', cmd: '__undo__' }] : []), ...(res.quiz ? [{ label: 'Open Tutor', cmd: '__tab__ tutor' }] : []), ...off.chips.slice(0, 3)] }));
+  node('learn', 'done', 'awaiting your feedback'); done(id);
+}
+
 export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { regenOf?: number } = {}) {
   const q = raw.trim(); if (!q || busy) return;
   busy = true; resetPipe(); touch('ask'); const t0 = Date.now();
@@ -118,6 +156,7 @@ export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { 
     node('perceive', 'active');
     // ---- memory commands + durable facts
     const lower = q.toLowerCase().replace(/[?.!]+$/, '');
+    if (/^(?:undo|undo that|undo (?:the )?last(?: action)?|revert that|take that back)$/.test(lower)) { node('perceive', 'done'); const m = await undoLast(); const id = add({ who: 'bot', text: m }); done(id); return; }
     if (/^(?:what do you (?:remember|know) about me|show (?:my )?memor(?:y|ies)|what('?s| is) in your memory)$/.test(lower)) { const all = memory.all().filter(m => m.kind !== 'episode'); node('perceive', 'done'); const id = add({ who: 'bot', text: all.length ? 'Here is what I remember (stored only on this device):\n' + all.slice(0, 25).map(m => `• ${m.text.replace(/\bthe user's\b/gi, 'your').replace(/\bthe user\b/gi, 'you')}`).join('\n') + '\n\nSay “forget <word>” or “forget everything” to remove items.' : 'I do not remember anything about you yet. Tell me your name, what you study, or say “remember that …”.' }); done(id); return; }
     { const f = lower.match(/^forget\s+(?:about\s+)?(.+)$/); if (f) { const n = memory.forget(f[1]); node('perceive', 'done'); const id = add({ who: 'bot', text: n ? `Forgotten: removed ${n} memor${n === 1 ? 'y' : 'ies'}.` : `I had nothing stored about “${f[1]}”.` }); done(id); return; } }
     const { facts, explicit } = extractFacts(q); for (const x of facts) memory.add(x, /prefers/.test(x) ? 'preference' : 'fact');
@@ -132,12 +171,17 @@ export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { 
     const libMove = q.match(/\b(?:move|put|file)\b.*\b(?:to|into)\s+(?:the\s+)?folder\s+["“']?([^"”',.]+?)["”']?\s*$/i); // PDF-library folders keep their own command
     const libFolder = !!libMove && listFolders().some(f => f.toLowerCase() === libMove[1].trim().toLowerCase()); if (libFolder) fsPlan = false;
     if (kinds.length === 1 && kinds[0] === 'help' && !fsPlan) { node('plan', 'skipped'); const id = add({ who: 'bot', text: helpText() + '\n\nFiles: “go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report”. Memory: “remember that my exam is on Friday”. Anything else: just ask.', chips: [{ label: 'Show the file tree', cmd: 'show the tree' }, { label: 'What do you remember?', cmd: 'what do you remember about me' }] }); done(id); return; }
-    let acting = fsPlan || known; if (libFolder) { plan = { version: 1, goal: q, planner: 'offline', steps: [{ id: 's1', action: 'app.command', label: q, args: { command: q }, status: 'pending' }] }; acting = true; }
-    if (!acting && IMPERATIVE.test(q)) { const mp = await modelPlan(q); if (mp) { plan = mp; acting = true; } }
+    // requests the agents own (sandboxed code, writing a note) are not file-system plans
+    const agentFirst = agentsEnabled() && !libFolder && (/```/.test(q) || (planRules(q).some(p => p.agent === 'scribe') && !plan.steps.some(st => /^fs\.(cd|capture|move|copy|mkdir|rename|delete)$/.test(st.action))));
+    if (agentFirst) fsPlan = false;
+    let acting = !agentFirst && (fsPlan || known); if (libFolder) { plan = { version: 1, goal: q, planner: 'offline', steps: [{ id: 's1', action: 'app.command', label: q, args: { command: q }, status: 'pending' }] }; acting = true; }
+    if (!acting && !agentFirst && IMPERATIVE.test(q)) { const mp = await modelPlan(q); if (mp) { plan = mp; acting = true; } }
     if (acting) {
       node('plan', 'done', `${plan.steps.length} step(s) · ${plan.planner} planner`); node('recall', 'skipped'); node('reason', 'skipped'); node('act', 'active');
-      const id = add({ who: 'bot', text: '', plan: clonePlan(plan), pipe: undefined }); const chips: Chip[] = [];
+      const risk = riskOf(plan.steps); if (risk.length && !(await askConfirm(risk))) { node('act', 'skipped', 'cancelled'); node('critic', 'skipped'); const cid = add({ who: 'bot', text: 'Cancelled. Nothing was changed.' }); done(cid); return; }
+      const id = add({ who: 'bot', text: '', plan: clonePlan(plan), pipe: undefined }); const chips: Chip[] = []; const jr = await journal.begin(q.slice(0, 80));
       const res = await executePlan(plan, planCtx, { vfs: vfs(), summarizer, runApp: async c => { const r = await runOne(c); if (r.chips) chips.push(...r.chips); if (r.ok && r.message) setLastOutput(r.message); return { ok: r.ok, message: r.message }; }, onUpdate: p => patch(id, m => ({ ...m, plan: clonePlan(p) }), false) });
+      const je = await jr.end(); if (je) chips.unshift({ label: 'Undo', cmd: '__undo__' });
       for (const st of plan.steps) if (st.action === 'fs.mkdir' && st.status === 'done' && !st.args.in && st.args.name) addFolder(st.args.name);
       node('act', res.ok ? 'done' : 'error', `${res.done} done${res.failed ? `, ${res.failed} failed` : ''}`); node('critic', 'active');
       const failedStep = plan.steps.find(s => s.status === 'failed'); const sugg = failedStep?.action === 'app.command' ? suggestions(failedStep.args.command) : [];
@@ -149,6 +193,7 @@ export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { 
       node('learn', 'done', 'episode stored'); memory.add(`Asked FRIDAY to: ${q.slice(0, 90)}`, 'episode'); done(id); return;
     }
     node('plan', 'done', 'conversation'); node('act', 'skipped');
+    if (agentsEnabled()) { const c0 = classify(q); const o0 = askCore(await getIndex(), q); if (agentFirst || (o0.kind !== 'chat' && o0.kind !== 'calc')) { await agentChat(q, c0, o0, opts); return; } }
 
     // ---- CHAT: recall → reason → critic
     node('recall', 'active'); const ctxClass = classify(q); const ix = await getIndex(); const off = askCore(ix, q);
@@ -186,5 +231,15 @@ export function feedback(id: number, kind: 'up' | 'down', reason?: Reason) {
 }
 export function copied(id: number) { const m = msgs.find(x => x.id === id); if (m?.strategy && m.ctx && !m.feedback) policy.reward(m.ctx, m.strategy, REWARD.copy); }
 export async function regenerate(id: number) { const m = msgs.find(x => x.id === id); if (!m?.question || busy) return; if (m.strategy && m.ctx) policy.reward(m.ctx, m.strategy, REWARD.regenerate); await send(m.question, 'text', { regenOf: id }); }
-export async function runChip(cmd: string) { if (cmd.startsWith('__open_file__ ')) { window.dispatchEvent(new CustomEvent('nm:friday-open-file', { detail: cmd.slice(14) })); return; } await send(cmd, 'text'); }
+export async function runChip(cmd: string) { if (cmd.startsWith('__confirm__ ')) { pendingConfirm?.(cmd.endsWith('yes')); return; } if (cmd === '__undo__') { const m = await undoLast(); const id = add({ who: 'bot', text: m }); done(id); return; } if (cmd.startsWith('__tab__ ')) { window.dispatchEvent(new CustomEvent('nm:friday-tab', { detail: cmd.slice(8) })); return; } if (cmd.startsWith('__open_file__ ')) { window.dispatchEvent(new CustomEvent('nm:friday-open-file', { detail: cmd.slice(14) })); return; } await send(cmd, 'text'); }
 export const welcome = () => { const n = memory.name(); return `${n ? `Hello ${n}. ` : 'Hello. '}I am FRIDAY, the only assistant here. Talk or type: I can chat about anything, explain and derive maths and science, write code, run your simulations, and manage your files, for example “go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report”.`; };
+
+/* ---------------- background-while-open: reminders and study nudges ---------------- */
+let loopOn = false;
+export function startBackground() {
+  if (loopOn || typeof window === 'undefined') return; loopOn = true;
+  const check = () => { for (const r of reminders.due()) { const id = add({ who: 'bot', text: `⏰ Reminder: ${r.text}` }); done(id); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('FRIDAY reminder', { body: r.text }); } catch { /* notifications blocked */ } } };
+  check(); setInterval(check, 20_000);
+  try { if (!sessionStorage.getItem('nm_nudged')) { const n = deck.nudges(); if (n.length) { add({ who: 'bot', text: 'Study nudges:\n' + n.slice(0, 3).map(x => '• ' + x).join('\n'), chips: [{ label: 'Open Tutor', cmd: '__tab__ tutor' }] }); sessionStorage.setItem('nm_nudged', '1'); } } } catch { /* storage */ }
+}
+startBackground();
