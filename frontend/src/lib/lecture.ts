@@ -273,26 +273,42 @@ For an ideal gas the two are related by Cp minus Cv equals R, where R is the gas
 That is all for today. Next time we will look at the second law and entropy.`;
 
 /* ---------------- read a public YouTube video with Gemini (needs the user's own Gemini key) ---------------- */
-export async function aiTranscribeVideo(cfg: AiConfig, videoId: string, signal?: AbortSignal): Promise<string> {
+export interface TranscribeDeps { fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>; onStatus?: (s: string) => void }
+const TRANSIENT = new Set([500, 502, 503, 504]);
+export async function aiTranscribeVideo(cfg: AiConfig, videoId: string, signal?: AbortSignal, deps: TranscribeDeps = {}): Promise<string> {
   if (cfg.provider !== 'gemini') throw new Error('Reading a video from its link needs a Gemini key. Add one in Settings, or paste the transcript instead.');
+  const doFetch = deps.fetch ?? fetch; const sleep = deps.sleep ?? ((ms: number) => new Promise<void>(r => setTimeout(r, ms)));
   const prompt = 'Transcribe the speech in this video. Write one line every 10 to 20 seconds. Start each line with its time in square brackets, like [00:00] or [1:02:30], then the words spoken, in the language spoken. Output only these lines and nothing else. If there is no speech, output exactly: [no speech]';
   const contents = [{ role: 'user', parts: [{ file_data: { file_uri: `https://www.youtube.com/watch?v=${videoId}` } }, { text: prompt }] }];
   // Speed: low video resolution (the words matter, not the picture) and no long "thinking". Plain body is the fallback when a model rejects those settings.
   const fast = JSON.stringify({ contents, generationConfig: { mediaResolution: 'MEDIA_RESOLUTION_LOW', thinkingConfig: { thinkingLevel: 'minimal' } } }), plain = JSON.stringify({ contents });
-  const base = 'https://generativelanguage.googleapis.com/v1beta'; let last = 'Gemini could not read this video.';
-  for (const model of geminiModels({ ...cfg, speed: 'fast' })) {
-    const post = (body: string) => fetch(`${base}/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body, signal });
-    let res = await post(fast); if (res.status === 400) res = await post(plain);
+  const base = 'https://generativelanguage.googleapis.com/v1beta'; let last = 'Gemini could not read this video.'; let overloaded = 0, limited = 0, tried = 0;
+  const models = geminiModels({ ...cfg, speed: 'fast' });
+  for (const model of models) {
+    const post = (body: string) => doFetch(`${base}/models/${model}:generateContent`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body, signal });
+    // A 503 means Google is busy for a moment, not that the video is unreadable: retry this model with a short back-off, then move to the next model.
+    let res: Response | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await post(fast); if (res.status === 400) res = await post(plain);
+      if (!TRANSIENT.has(res.status)) break;
+      if (attempt < 2) { deps.onStatus?.(`Google's AI is busy (${res.status}). Retrying in ${1.5 * (attempt + 1)} s…`); await sleep(1500 * (attempt + 1)); if (signal?.aborted) throw new Error('Cancelled.'); }
+    }
+    tried++;
+    if (!res) continue;
     if (!res.ok) {
       const t = await res.text().catch(() => ''); let msg = t.slice(0, 240); try { msg = JSON.parse(t)?.error?.message || msg; } catch { /* keep raw */ }
-      if (res.status === 429) throw new Error('Gemini says the rate limit is reached. Wait a minute and try again.');
       if (res.status === 401 || res.status === 403 || /API key/i.test(msg)) throw new Error('Gemini rejected the key. Check it in Settings.');
-      last = `Gemini could not read this video (${res.status}): ${msg.slice(0, 160)}. Only public videos work; private, members-only or age-restricted videos do not.`;
+      if (TRANSIENT.has(res.status)) { overloaded++; last = `Gemini is overloaded right now (${res.status}).`; deps.onStatus?.(models.indexOf(model) < models.length - 1 ? `${model} is busy, trying another model…` : ''); continue; }
+      if (res.status === 429) { limited++; last = 'Gemini says the rate limit is reached.'; continue; }
+      last = `Gemini could not read this video (${res.status}): ${msg.slice(0, 160)}. Only public videos work; private, members-only, age-restricted or still-live streams do not.`;
       if (res.status === 404 || res.status === 400) continue; throw new Error(last);
     }
     const j = await res.json(); const text = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim();
     if (!text || /^\[?no speech\]?\.?$/i.test(text)) throw new Error('Gemini found no speech in that video.');
     return text;
   }
+  const alt = 'You can press the button again in a minute, paste the transcript instead (YouTube: ⋯ More → Show transcript → copy), or load an .srt/.vtt file.';
+  if (tried > 0 && overloaded === tried) throw new Error(`Google's Gemini service is overloaded at the moment (tried ${tried} model${tried === 1 ? '' : 's'}, with retries). This is temporary and not a problem with your key or the video. ${alt}`);
+  if (tried > 0 && limited + overloaded === tried) throw new Error(`Gemini is busy or rate-limited right now. Wait a minute. ${alt}`);
   throw new Error(last);
 }

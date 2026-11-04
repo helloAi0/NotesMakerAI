@@ -18,7 +18,7 @@
     "predev": "node tools/copy-ocr.mjs",
     "prebuild": "node tools/copy-ocr.mjs",
     "postinstall": "node tools/copy-ocr.mjs",
-    "test:unit": "tsx tools/intents.mts && vite-node tools/fmt.mts && tsx tools/friday.mts && tsx tools/logic_cs.mts && tsx tools/logic_sci.mts && tsx tools/friday_fs.mts && tsx tools/friday_brain.mts && tsx tools/logic_gap.mts && tsx tools/logic_extra.mts && tsx tools/stt.mts && tsx tools/lecture.mts && tsx tools/cloud_dictation.mts && tsx tools/cloud_dictation_fast.mts && tsx tools/tts_engine.mts && tsx tools/yt_transcript.mts && tsx tools/dictation_join.mts && tsx tools/lecture_adv.mts && tsx tools/friday_agents.mts && tsx tools/wake.mts && tsx tools/journal_blob.mts && tsx tools/embed.mts && tsx tools/whisper_local.mts && tsx tools/report.mts",
+    "test:unit": "tsx tools/intents.mts && vite-node tools/fmt.mts && tsx tools/friday.mts && tsx tools/logic_cs.mts && tsx tools/logic_sci.mts && tsx tools/friday_fs.mts && tsx tools/friday_brain.mts && tsx tools/logic_gap.mts && tsx tools/logic_extra.mts && tsx tools/stt.mts && tsx tools/lecture.mts && tsx tools/cloud_dictation.mts && tsx tools/cloud_dictation_fast.mts && tsx tools/tts_engine.mts && tsx tools/yt_transcript.mts && tsx tools/dictation_join.mts && tsx tools/lecture_adv.mts && tsx tools/friday_agents.mts && tsx tools/wake.mts && tsx tools/journal_blob.mts && tsx tools/embed.mts && tsx tools/whisper_local.mts && tsx tools/report.mts && tsx tools/transcribe_retry.mts",
     "test:desktop": "node tools/e2e_desktop.mjs"
   },
   "dependencies": {

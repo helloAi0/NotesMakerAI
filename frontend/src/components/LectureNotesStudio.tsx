@@ -73,7 +73,7 @@ export default function LectureNotesStudio() {
       const cfg = llmConfig();
       if (!cfg || cfg.provider !== 'gemini') { setMsg(`${cc && 'error' in cc ? cc.error + ' ' : cc === null ? 'Captions can only be fetched while running “npm run dev” with internet. ' : ''}Paste the transcript instead (YouTube: ⋯ More → Show transcript → copy), or add a Gemini key so Gemini can watch the video.`); return; }
       setMsg(`${cc && 'error' in cc ? 'No captions were available. ' : ''}Gemini is watching the video and writing its transcript. A long lecture can take several minutes: you can cancel and paste the transcript instead.`);
-      const t = await aiTranscribeVideo(cfg, id, ac.signal); setRaw(t); setRawFor(id); build(t, id);
+      const t = await aiTranscribeVideo(cfg, id, ac.signal, { onStatus: m => m && setMsg(m) }); setRaw(t); setRawFor(id); build(t, id);
     } catch (e) { setMsg(ac.signal.aborted ? 'Cancelled.' : (e as Error).message); } finally { setBusy(false); abortRef.current = null; }
   };
   const onUrl = (v: string) => {
