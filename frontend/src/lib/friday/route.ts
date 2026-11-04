@@ -56,6 +56,7 @@ export function localTiers(): { small: string; big: string } | null { const u = 
 export const getEmbed = () => get('nm_friday_embed') || ''; export const setEmbed = (m: string) => set('nm_friday_embed', m);
 export const setTiers = (small: string, big: string) => { set('nm_friday_small', small); set('nm_friday_big', big); };
 /** Pick the best model name from an installed list (prefers instruct/chat models of a useful size). */
+export const isEmbedModel = (m: string) => /embed|nomic|bge|minilm|mxbai|gte|rerank|whisper|clip/i.test(m);
 export function pickModel(models: string[]): string {
   const rank = (m: string) => { const l = m.toLowerCase(); let s = 0; if (/instruct|chat|it\b/.test(l)) s += 2; if (/llama3|llama-3|qwen|mistral|gemma|phi|deepseek|gpt-oss/.test(l)) s += 3; if (/embed|nomic|bge|minilm|whisper|clip|vision-only/.test(l)) s -= 10; const sz = l.match(/(\d+(?:\.\d+)?)b\b/); if (sz) { const b = +sz[1]; s += b >= 7 && b <= 34 ? 3 : b >= 3 ? 2 : 0; } return s; };
   return [...models].sort((a, b) => rank(b) - rank(a))[0] ?? '';
@@ -71,6 +72,7 @@ export async function localReachable(force = false): Promise<boolean> {
 /** Decide which engines are allowed right now and in which order. */
 export async function plan(): Promise<{ order: Resolved[]; pref: RoutePref }> {
   const pref = getRoutePref(), online = isOnline(), order: Resolved[] = []; const lc = getLocal(), cloud = llmConfig();
+  if (lc && isEmbedModel(lc.model)) { const fix = pickModel(knownModels().filter(m => !isEmbedModel(m))); if (fix) lc.model = fix; } // an embedding model cannot chat: use the best chat model instead
   const local: Resolved | null = lc && (await localReachable()) ? { engine: 'local', cfg: localAsAi(lc), label: `Local model · ${lc.model || 'default'}`, reason: 'running on this computer' } : null;
   const cl: Resolved | null = cloud && online ? { engine: 'cloud', cfg: cloud, label: `Cloud · ${cloud.provider}${cloud.model ? ' · ' + cloud.model : ''}`, reason: 'your saved API key' } : null;
   const off: Resolved = { engine: 'offline', cfg: null, label: 'Offline engine', reason: 'built-in knowledge, your notes and PDFs' };
