@@ -133,7 +133,7 @@ async function agentChat(q: string, ctxClass: Ctx, off: { chips: Chip[] }, opts:
   const strategy: Strategy = opts.regenOf ? (STRATEGIES.filter(s => s !== msgs.find(m => m.id === opts.regenOf)?.strategy)[Math.floor(Math.random() * (STRATEGIES.length - 1))]) : policy.pick(ctxClass);
   const id = add({ who: 'bot', text: '', streaming: true, strategy, ctx: ctxClass, question: q });
   node('plan', 'active', 'Planner'); node('recall', 'active');
-  const deps = buildDeps({ memory, persona: PERSONA, style: `${STRATEGY_STYLE[strategy]} ${policy.prefText()}`.trim() });
+  const cur0 = await router.current(); const deps = buildDeps({ memory, persona: PERSONA, style: `${STRATEGY_STYLE[strategy]} ${policy.prefText()}`.trim(), engine: cur0 });
   if (opts.image) { const a = opts.image; const ps = []; if (a.ocr) ps.push({ id: 'img:ocr', kind: 'image', title: `Image: ${a.name}`, where: 'text in image (OCR)', text: a.ocr }); if (a.description) ps.push({ id: 'img:desc', kind: 'image', title: `Image: ${a.name}`, where: 'description by vision model', text: a.description }); if (!ps.length) ps.push({ id: 'img:none', kind: 'image', title: `Image: ${a.name}`, where: 'nothing readable', text: a.notes.join(' ') || 'No readable content was found in this image.' }); deps.pinned = ps; }
   const cur = await router.current();
   const res = await runAgents(q, deps, { onUpdate: (run, board) => {

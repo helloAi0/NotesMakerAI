@@ -35,7 +35,7 @@ export interface Deps {
   confirm?: (why: string[]) => Promise<boolean>;
   offline?: (q: string) => { text: string; found: boolean };
   extractFacts: (msg: string) => { facts: string[]; explicit: boolean };
-  persona?: string; style?: string; deep?: boolean; pinned?: Passage[]; // pinned = material the user attached to this question (an image's text/description)
+  persona?: string; style?: string; deep?: boolean; timeScale?: number; pinned?: Passage[]; // pinned = material the user attached to this question (an image's text/description)
 }
 export interface Out { text: string; data?: unknown; citations?: Citation[]; confidence?: number; flags?: string[] }
 export interface Ctx { task: Task; guard: Guard; deps: Deps; board: Board; goal: string }
@@ -97,14 +97,14 @@ export const researcher: AgentFn = async ({ guard, deps, goal }) => {
   if (deps.llm) {
     const prompt = [deps.persona ?? 'You are FRIDAY, a careful study assistant.', DATA_NOTICE, deps.style ? `STYLE: ${deps.style}` : '', mem.length ? `WHAT YOU REMEMBER ABOUT THE USER:\n${mem.map(m => '- ' + m.text).join('\n')}` : '',
       hits.length ? `SOURCES (cite as [1], [2] … ; use only these; say so if they do not answer the question):\n${clean.map((c, i) => wrapData(`[${i + 1}] ${c.h.passage.title}${c.h.passage.where ? ' · ' + c.h.passage.where : ''}`, c.text.slice(0, 1400))).join('\n')}` : 'No local sources matched. Answer from general knowledge and say that no notes or PDFs were used.', `QUESTION: ${goal}`, 'ANSWER:'].filter(Boolean).join('\n\n');
-    const r = await guard.use('llm', prompt, () => deps.llm!(prompt, { tier: tierOf(goal) })); if (r?.trim()) { text = r.trim().replace(/\[(\d+)\]/g, (m, n) => (+n >= 1 && +n <= hits.length ? m : '')); conf = hits.length ? Math.min(0.92, 0.45 + top * 0.8) : 0.5; }
-    if (text && deps.deep) { const rp = `Review the DRAFT answer to the user’s question for factual, mathematical or logical errors and for missing steps. Return only the corrected, final answer in the same style (no commentary about the review).\n\nQUESTION: ${goal}\n\nDRAFT:\n${text}`; const r2 = await guard.use('llm', rp, () => deps.llm!(rp, { tier: 'deep' })).catch(() => null); if (r2?.trim()) text = r2.trim().replace(/\[(\d+)\]/g, (m, n) => (+n >= 1 && +n <= hits.length ? m : '')); }
+    const t0 = deps.now(); const r = await guard.use('llm', prompt, () => deps.llm!(prompt, { tier: tierOf(goal) })).catch((e: Error) => { flags.push(`the language model did not answer in time (${e.message.slice(0, 60)})`); return null; }); const slow = deps.now() - t0 > 30_000; if (r?.trim()) { text = r.trim().replace(/\[(\d+)\]/g, (m, n) => (+n >= 1 && +n <= hits.length ? m : '')); conf = hits.length ? Math.min(0.92, 0.45 + top * 0.8) : 0.5; }
+    if (text && deps.deep && !slow) { const rp = `Review the DRAFT answer to the user’s question for factual, mathematical or logical errors and for missing steps. Return only the corrected, final answer in the same style (no commentary about the review).\n\nQUESTION: ${goal}\n\nDRAFT:\n${text}`; const r2 = await guard.use('llm', rp, () => deps.llm!(rp, { tier: 'deep' })).catch(() => null); if (r2?.trim()) text = r2.trim().replace(/\[(\d+)\]/g, (m, n) => (+n >= 1 && +n <= hits.length ? m : '')); }
   }
   const mine = (k: string) => k === 'note' || k === 'pdf' || k === 'file';
   if (!text && !deps.llm && deps.offline && !hits.some(h => mine(h.passage.kind))) { const o = deps.offline(goal); if (o.found && o.text) { text = o.text; conf = 0.6; } }
   if (!text && hits.length) { text = clean.slice(0, 3).map((c, i) => `From **${c.h.passage.title}**${c.h.passage.where ? ` (${c.h.passage.where})` : ''}: ${c.text.slice(0, 320)} [${i + 1}]`).join('\n\n'); conf = Math.min(0.85, 0.35 + top * 0.8); }
   if (!text && deps.offline) { const o = deps.offline(goal); if (o.found && o.text) { text = o.text; conf = 0.55; } }
-  return { text, data: { evidence, hits: hits.length, injected: flags.length > 0 }, citations, confidence: text ? conf : 0, flags };
+  return { text, data: { evidence, hits: hits.length, injected: flags.some(f => /untrusted text/.test(f)) }, citations, confidence: text ? conf : 0, flags };
 };
 
 /* ---------------- Solver ---------------- */
@@ -176,7 +176,7 @@ const sentences = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim())
 export const critic: AgentFn = async ({ guard, deps, board, task, goal }) => {
   const parts = board.depResults(task).filter(t => !['scribe', 'memory', 'planner'].includes(t.agent)); const flags: string[] = []; let conf = 1; const sections: string[] = []; let citations: Citation[] = [];
   const failed = board.all().filter(t => task.deps.includes(t.id) && t.status === 'failed'); for (const f of failed) { flags.push(`${f.agent} failed: ${f.error ?? 'error'}`); conf = Math.min(conf, 0.4); }
-  const used = parts.filter(p => p.text?.trim()); if (!used.length) return { text: 'I could not find anything in your notes, PDFs or memory about that, and no calculation or action applied. Connect a model (Brain tab) or add the material and ask again.', confidence: 0.15, flags: [...flags, 'no evidence'], data: { unsure: true } };
+  const used = parts.filter(p => p.text?.trim()); if (!used.length) { const slow = board.all().some(t => task.deps.includes(t.id) && (t.flags ?? []).some(f => /did not answer in time/.test(f))); return { text: slow ? 'The language model did not answer in time. A large local model can take minutes on a CPU. Try again, or use a smaller one (for example `ollama pull llama3.2:3b`, then pick it as the Small model in the Brain tab). Check `ollama ps` to see whether it runs on the GPU.' : 'I could not find anything in your notes, PDFs or memory about that, and no calculation or action applied. Connect a model (Brain tab) or add the material and ask again.', confidence: 0.15, flags: [...flags, slow ? 'model timeout' : 'no evidence'], data: { unsure: true } }; }
   const nums: { agent: string; v: number }[] = [];
   for (const p of used) {
     let text = p.text!; let c = p.confidence ?? 0.6; let cap = 1;

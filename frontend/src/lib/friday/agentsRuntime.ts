@@ -34,9 +34,11 @@ export async function corpus(): Promise<{ r: Retriever; ix: Index }> {
   cache = { sig, r: new Retriever(ps, embedder()), ix }; return cache;
 }
 
-export function buildDeps(o: { memory: MemoryLike; persona: string; style?: string }): Deps {
+export function buildDeps(o: { memory: MemoryLike; persona: string; style?: string; engine?: { engine: string; label: string } }): Deps {
+  const scale = o.engine?.engine === 'local' ? 8 : o.engine?.engine === 'cloud' ? 2 : 1; // an 8B model on a CPU needs minutes, not seconds
   return {
-    now: Date.now, retriever: async () => (await corpus()).r, calc, runCode: browserRunner, memory: o.memory, deck, reminders, extractFacts, persona: o.persona, style: o.style, deep: router.getDeep(),
+    timeScale: scale,
+    now: Date.now, retriever: async () => (await corpus()).r, calc, runCode: browserRunner, memory: o.memory, deck, reminders, extractFacts, persona: o.engine && o.engine.engine !== 'offline' ? `${o.persona} You are currently running on: ${o.engine.label}.` : o.persona, style: o.style, deep: router.getDeep(),
     llm: async (prompt, opts) => { const cur = await router.current(); if (cur.engine === 'offline') return null; const g = await router.route(prompt, { stream: false, json: opts?.json, tier: opts?.tier, temperature: opts?.temperature, maxTokens: 1200 }); return g && g.engine !== 'offline' && g.text ? g.text : null; },
     sim: { run: async c => { const r = await runOne(c); return { ok: r.ok, message: r.message }; }, read: () => snapshot() },
     fs: { vfs: vfs(), journal }, confirm: why => (confirmHandler ? confirmHandler(why) : Promise.resolve(false)),

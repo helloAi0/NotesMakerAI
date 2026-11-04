@@ -80,7 +80,7 @@ export function replay(run: Run, upTo: number): Record<string, 'pending' | 'runn
 /* ---------------- guard: every tool call goes through here ---------------- */
 export class Guard {
   steps = 0; tokens = 0; private deadline: number; agent: AgentName; task: Task; private trace: Trace; private now: () => number; private perms: Record<AgentName, Perm>;
-  constructor(agent: AgentName, task: Task, trace: Trace, now: () => number = Date.now, perms: Record<AgentName, Perm> = PERMS) { this.agent = agent; this.task = task; this.trace = trace; this.now = now; this.perms = perms; this.deadline = now() + perms[agent].maxMs; }
+  constructor(agent: AgentName, task: Task, trace: Trace, now: () => number = Date.now, perms: Record<AgentName, Perm> = PERMS, scale = 1) { this.agent = agent; this.task = task; this.trace = trace; this.now = now; this.perms = perms; this.deadline = now() + perms[agent].maxMs * scale; }
   can(tool: Tool) { return this.perms[this.agent].tools.includes(tool); }
   /** Run one tool call: checks permission, step and time budget, times it, records it, and meters tokens for model calls. */
   async use<T>(tool: Tool, detail: string, fn: () => Promise<T> | T, size?: (r: T) => string): Promise<T> {

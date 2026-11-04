@@ -9,14 +9,14 @@ import type { Deps, PlanItem } from './agents';
 import type { KV } from '../learn';
 
 export interface AgentResult { text: string; confidence: number; unsure: boolean; citations: Citation[]; run: Run; flags: string[]; plan: PlanItem[]; planner: string; savedPath?: string; journalId?: string; quiz?: unknown }
-export interface RunOpts { onUpdate?: (run: Run, board: Board) => void; maxMs?: number; only?: PlanItem[] }
+export interface RunOpts { timeScale?: number; onUpdate?: (run: Run, board: Board) => void; maxMs?: number; only?: PlanItem[] }
 
 export async function runAgents(goal: string, deps: Deps, opts: RunOpts = {}): Promise<AgentResult> {
-  const now = deps.now; const board = new Board(now); const trace = new Trace(goal, now); const tick = () => opts.onUpdate?.(trace.run, board); const t0 = now(); const budget = opts.maxMs ?? 90_000;
+  const now = deps.now; const board = new Board(now); const trace = new Trace(goal, now); const tick = () => opts.onUpdate?.(trace.run, board); const t0 = now(); const budget = opts.maxMs ?? 90_000 * (opts.timeScale ?? deps.timeScale ?? 1);
   trace.add({ type: 'run', detail: goal.slice(0, 200) });
   const exec = async (t: Task): Promise<void> => {
     t.status = 'running'; t.startedAt = now(); trace.add({ agent: t.agent, taskId: t.id, type: 'start', detail: t.goal.slice(0, 120) }); tick();
-    const guard = new Guard(t.agent, t, trace, now);
+    const guard = new Guard(t.agent, t, trace, now, undefined, opts.timeScale ?? deps.timeScale ?? 1);
     try {
       const out = await AGENT_FNS[t.agent]({ task: t, guard, deps, board, goal: t.goal });
       board.post({ type: 'result', taskId: t.id, text: out.text, data: out.data, citations: out.citations }); board.post({ type: 'confidence', taskId: t.id, value: out.confidence ?? (out.text ? 0.6 : 0), reasons: out.flags ?? [] });
