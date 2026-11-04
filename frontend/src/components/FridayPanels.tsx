@@ -121,7 +121,24 @@ export function BrainPanel({ onChange }: { onChange: () => void }) {
         {found?.map(f => <div key={f.url} className="mb-2 text-xs"><div className="text-slate-500">{f.kind} · {f.url}</div><div className="flex flex-wrap gap-1 mt-1">{f.models.slice(0, 20).map(m => <button key={m} onClick={() => { const c = { kind: f.kind, url: f.url, model: m }; router.setLocal(c); setLocal(c); onChange(); }} className={`px-2 py-0.5 rounded-full border ${local?.model === m && local.url === f.url ? 'bg-amber-600 text-white border-amber-600' : 'hover:bg-slate-50'}`}>{m}</button>)}</div></div>)}
         {local && <div className="text-xs text-slate-700">Selected: <b>{local.model || 'default'}</b> at {local.url} <button onClick={() => { router.setLocal(null); setLocal(null); onChange(); }} className="ml-2 text-red-700 underline">remove</button></div>}
       </div>
+      <ModelRoles />
       <p className="text-[11px] text-slate-500">Cloud keys are added in Settings. Honest scope: the quality of open-ended answers is the quality of the model you connect. The offline engine answers from built-in STEM knowledge plus your own notes and PDFs, and says so when it does not know.</p>
+    </div>
+  );
+}
+
+/* ---------------- model roles: small/large tiers, embedding model, vision model ---------------- */
+function ModelRoles() {
+  const models = router.knownModels(); const t = router.localTiers(); const [small, setSmall] = useState(t?.small ?? ''); const [big, setBig] = useState(t?.big ?? ''); const [emb, setEmb] = useState(router.getEmbed());
+  const chat = models.filter(m => !/embed|nomic|bge|minilm|whisper|clip|rerank|mxbai|gte/i.test(m)); const embs = models.filter(m => /embed|nomic|bge|minilm|mxbai|gte/i.test(m)); const sel = 'border rounded px-2 py-1 text-xs bg-white'; const vision = models.find(m => /llava|vision|qwen.*vl|minicpm-v|moondream|gemma3|bakllava/i.test(m));
+  if (!models.length) return <div className="text-[11px] text-slate-500 border rounded p-2" data-testid="roles">Model roles (small/fast model, embedding model, vision model) appear here after “Find local model” finds a server with models.</div>;
+  return (
+    <div className="border rounded p-3 text-xs space-y-2" data-testid="roles"><div className="font-semibold">Model roles (local)</div>
+      <label className="flex items-center gap-2 flex-wrap"><span className="w-40">Small / fast (routing, easy questions)</span><select className={sel} value={small} onChange={e => { setSmall(e.target.value); if (big) router.setTiers(e.target.value, big); }} data-testid="role-small"><option value="">auto</option>{chat.map(m => <option key={m}>{m}</option>)}</select></label>
+      <label className="flex items-center gap-2 flex-wrap"><span className="w-40">Large (hard problems)</span><select className={sel} value={big} onChange={e => { setBig(e.target.value); if (small) router.setTiers(small, e.target.value); }} data-testid="role-big"><option value="">auto</option>{chat.map(m => <option key={m}>{m}</option>)}</select></label>
+      <label className="flex items-center gap-2 flex-wrap"><span className="w-40">Embedding (search by meaning)</span><select className={sel} value={emb} onChange={e => { setEmb(e.target.value); router.setEmbed(e.target.value); }} data-testid="role-embed"><option value="">auto{embs[0] ? ` (${embs[0]})` : ''}</option><option value="off">built-in only</option>{embs.map(m => <option key={m}>{m}</option>)}</select></label>
+      {!embs.length && <div className="text-slate-500">No embedding model installed: search uses built-in concept vectors. For real semantic search run <code className="bg-slate-100 px-1">ollama pull nomic-embed-text</code>, then “Find local model”.</div>}
+      <div className="text-slate-600">Vision (images): {vision ? <b>{vision}</b> : 'none installed — run `ollama pull llava` or `llama3.2-vision`. Text in images is still read offline.'}</div>
     </div>
   );
 }

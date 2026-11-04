@@ -1,0 +1,23 @@
+{
+  "name": "notes-maker-ai-desktop",
+  "version": "1.0.0",
+  "description": "Notes Maker AI + FRIDAY as a desktop app: runs from the system tray so reminders and study nudges keep working when the window is closed.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "build:web": "npm --prefix ../frontend run build",
+    "start": "npm run build:web && electron .",
+    "start:fast": "electron .",
+    "pack": "npm run build:web && electron-builder --dir",
+    "dist": "npm run build:web && electron-builder"
+  },
+  "devDependencies": { "electron": "^33.0.0", "electron-builder": "^25.1.8" },
+  "build": {
+    "appId": "ai.notesmaker.desktop",
+    "productName": "Notes Maker AI",
+    "files": ["main.js", "preload.js", "icon.png", { "from": "../frontend/dist", "to": "web", "filter": ["**/*"] }],
+    "win": { "target": ["nsis"] },
+    "mac": { "target": ["dmg"], "category": "public.app-category.education" },
+    "linux": { "target": ["AppImage", "deb"], "category": "Education" }
+  }
+}

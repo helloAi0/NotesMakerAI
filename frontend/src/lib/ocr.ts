@@ -41,3 +41,12 @@ export async function recognize(canvas: HTMLCanvasElement, scale = 1.5): Promise
 }
 
 export async function terminateOcr() { if (workerP) { try { (await workerP).terminate(); } catch { /* ignore */ } workerP = null; } }
+
+/** Recognise printed text or neat handwriting in an ordinary photo or screenshot (greyscale + contrast stretch, no ink assumption). */
+export async function recognizeImage(img: HTMLCanvasElement): Promise<{ text: string; confidence: number }> {
+  const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; const g = c.getContext('2d', { willReadFrequently: true })!; g.drawImage(img, 0, 0);
+  const im = g.getImageData(0, 0, c.width, c.height), d = im.data; let lo = 255, hi = 0;
+  for (let i = 0; i < d.length; i += 4) { const y = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000; d[i] = y; if (y < lo) lo = y; if (y > hi) hi = y; }
+  const k = hi - lo > 20 ? 255 / (hi - lo) : 1; for (let i = 0; i < d.length; i += 4) { const v = Math.max(0, Math.min(255, (d[i] - lo) * k)); d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; } g.putImageData(im, 0, 0);
+  const worker = await getWorker(); const res = await worker.recognize(c); return { text: String(res.data.text ?? '').replace(/\n{3,}/g, '\n\n').trim(), confidence: Number(res.data.confidence ?? 0) / 100 };
+}

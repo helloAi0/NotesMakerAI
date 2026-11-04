@@ -6,7 +6,7 @@ import { tokens } from '../../textTools';
 import { parseCommandless } from './util';
 import { Guard } from './core';
 import type { AgentName, Board, Citation, Task } from './core';
-import type { Retriever } from './retrieval';
+import type { Retriever, Passage, Hit } from './retrieval';
 import { toCitation } from './retrieval';
 import { sanitize, wrapData, DATA_NOTICE } from './sanitize';
 import { recomputeClaims, fixClaims, sampleAndAgree, jaccard, UNSURE } from './verify';
@@ -35,7 +35,7 @@ export interface Deps {
   confirm?: (why: string[]) => Promise<boolean>;
   offline?: (q: string) => { text: string; found: boolean };
   extractFacts: (msg: string) => { facts: string[]; explicit: boolean };
-  persona?: string; style?: string; deep?: boolean;
+  persona?: string; style?: string; deep?: boolean; pinned?: Passage[]; // pinned = material the user attached to this question (an image's text/description)
 }
 export interface Out { text: string; data?: unknown; citations?: Citation[]; confidence?: number; flags?: string[] }
 export interface Ctx { task: Task; guard: Guard; deps: Deps; board: Board; goal: string }
@@ -90,7 +90,7 @@ export const planner: AgentFn = async ({ guard, deps, goal }) => {
 /* ---------------- Researcher ---------------- */
 export const researcher: AgentFn = async ({ guard, deps, goal }) => {
   const mem = await guard.use('memory.read', 'recall memory', () => deps.memory.recall(goal, 3));
-  const retr = await deps.retriever(); const hits = await guard.use('retrieve', `search: ${goal}`, () => retr.search(goal, 5));
+  const retr = await deps.retriever(); const found = await guard.use('retrieve', `search: ${goal}`, () => retr.search(goal, 5)); const pins: Hit[] = (deps.pinned ?? []).map(p => ({ passage: p, score: 0.9, quote: p.text.slice(0, 200), via: ['attached'] })); const hits = [...pins, ...found.filter(h => !pins.some(p => p.passage.id === h.passage.id))].slice(0, 6);
   const flags: string[] = []; const clean = hits.map(h => { const c = sanitize(h.passage.text); if (c.flags.length) { flags.push(`untrusted text in “${h.passage.title}” was neutralised (${c.flags.join(', ')})`); guard.flag(`injection-like text in ${h.passage.title}: ${c.flags.join(', ')}`); } return { h, text: c.text }; });
   const citations = hits.map((h, i) => toCitation(h, i + 1)); const evidence = clean.map(c => c.text);
   const top = hits[0]?.score ?? 0; let text = '', conf = 0;

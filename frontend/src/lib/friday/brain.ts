@@ -30,6 +30,8 @@ import { buildDeps, deck, journal, reminders, runStore, agentsEnabled, setConfir
 import { runAgents } from './agents/orchestrator';
 import { riskOf } from './agents/journal';
 import { planRules } from './agents/agents';
+import { analyze } from './vision';
+import type { Analysis } from './vision';
 import type { Engine, WebHit } from './route';
 
 export interface Chip { label: string; cmd: string }
@@ -39,7 +41,7 @@ export interface Msg {
   id: number; who: 'you' | 'bot'; text: string; t: number; via?: 'voice' | 'text';
   plan?: Plan; chips?: Chip[]; sources?: { kind: string; title: string; where?: string; url?: string }[];
   engine?: Engine; engineLabel?: string; strategy?: Strategy; ctx?: Ctx; confidence?: number; notes?: string[];
-  feedback?: 'up' | 'down'; streaming?: boolean; question?: string; pipe?: PipeNode[]; runId?: string;
+  feedback?: 'up' | 'down'; streaming?: boolean; question?: string; pipe?: PipeNode[]; runId?: string; img?: string;
 }
 const KEY = 'nm_friday_chat_v2';
 const NODE_LABELS: Record<NodeId, string> = { perceive: 'Perceive', plan: 'Plan', recall: 'Recall', reason: 'Reason', act: 'Act', critic: 'Critic', learn: 'Learn' };
@@ -127,11 +129,12 @@ setConfirmHandler(askConfirm);
 export async function undoLast(): Promise<string> { const r = await journal.undo(); return r.message; }
 
 /* ---------------- multi-agent answer ---------------- */
-async function agentChat(q: string, ctxClass: Ctx, off: { chips: Chip[] }, opts: { regenOf?: number }) {
+async function agentChat(q: string, ctxClass: Ctx, off: { chips: Chip[] }, opts: { regenOf?: number; image?: Analysis }) {
   const strategy: Strategy = opts.regenOf ? (STRATEGIES.filter(s => s !== msgs.find(m => m.id === opts.regenOf)?.strategy)[Math.floor(Math.random() * (STRATEGIES.length - 1))]) : policy.pick(ctxClass);
   const id = add({ who: 'bot', text: '', streaming: true, strategy, ctx: ctxClass, question: q });
   node('plan', 'active', 'Planner'); node('recall', 'active');
   const deps = buildDeps({ memory, persona: PERSONA, style: `${STRATEGY_STYLE[strategy]} ${policy.prefText()}`.trim() });
+  if (opts.image) { const a = opts.image; const ps = []; if (a.ocr) ps.push({ id: 'img:ocr', kind: 'image', title: `Image: ${a.name}`, where: 'text in image (OCR)', text: a.ocr }); if (a.description) ps.push({ id: 'img:desc', kind: 'image', title: `Image: ${a.name}`, where: 'description by vision model', text: a.description }); if (!ps.length) ps.push({ id: 'img:none', kind: 'image', title: `Image: ${a.name}`, where: 'nothing readable', text: a.notes.join(' ') || 'No readable content was found in this image.' }); deps.pinned = ps; }
   const cur = await router.current();
   const res = await runAgents(q, deps, { onUpdate: (run, board) => {
     const ts = board.all(); const names = (st: string) => ts.filter(t => t.status === st).map(t => t.agent); const workers = ts.filter(t => ['researcher', 'solver', 'simop', 'tutor'].includes(t.agent));
@@ -143,15 +146,23 @@ async function agentChat(q: string, ctxClass: Ctx, off: { chips: Chip[] }, opts:
   runStore.add(res.run);
   setLastOutput(res.text);
   patch(id, m => ({ ...m, text: res.text, streaming: false, engine: cur.engine, engineLabel: `${cur.label} · agents`, confidence: res.confidence, runId: res.run.id,
-    notes: res.flags.slice(0, 4), sources: res.citations.slice(0, 6).map(c => ({ kind: c.kind, title: c.title, where: c.where })),
+    notes: [...(opts.image?.notes ?? []), ...res.flags].slice(0, 5), sources: res.citations.slice(0, 6).map(c => ({ kind: c.kind, title: c.title, where: c.where })),
     chips: [...(res.journalId ? [{ label: 'Undo', cmd: '__undo__' }] : []), ...(res.quiz ? [{ label: 'Open Tutor', cmd: '__tab__ tutor' }] : []), ...off.chips.slice(0, 3)] }));
   node('learn', 'done', 'awaiting your feedback'); done(id);
 }
 
-export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { regenOf?: number } = {}) {
+export async function sendImage(question: string, file: Blob, name = 'image') {
+  if (isBusy()) return; busy = true; resetPipe(); node('perceive', 'active', 'reading the image');
+  const q = question.trim() || 'What is in this image? Read any text and explain any diagram.'; let a: Analysis | null = null; let wid = 0;
+  try { wid = add({ who: 'bot', text: 'Reading the image…', streaming: true }); a = await analyze(file, name, s => patch(wid, m => ({ ...m, text: s[0].toUpperCase() + s.slice(1) }), false)); add({ who: 'you', text: q, via: 'text', img: a.thumb }); }
+  catch (e) { add({ who: 'bot', text: `I could not open that image: ${(e as Error).message}` }); }
+  finally { msgs = msgs.filter(m => m.id !== wid); busy = false; tick(); }
+  if (a) { const t = msgs.findIndex(m => m.img === a!.thumb); const ord = msgs.splice(t, 1); msgs = [...msgs, ...ord]; await send(q, 'text', { image: a, skipUser: true }); }
+}
+export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { regenOf?: number; image?: Analysis; skipUser?: boolean } = {}) {
   const q = raw.trim(); if (!q || busy) return;
   busy = true; resetPipe(); touch('ask'); const t0 = Date.now();
-  if (!opts.regenOf) add({ who: 'you', text: q, via });
+  if (!opts.regenOf && !opts.skipUser) add({ who: 'you', text: q, via });
   try {
     node('perceive', 'active');
     // ---- memory commands + durable facts
@@ -172,7 +183,7 @@ export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { 
     const libFolder = !!libMove && listFolders().some(f => f.toLowerCase() === libMove[1].trim().toLowerCase()); if (libFolder) fsPlan = false;
     if (kinds.length === 1 && kinds[0] === 'help' && !fsPlan) { node('plan', 'skipped'); const id = add({ who: 'bot', text: helpText() + '\n\nFiles: “go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report”. Memory: “remember that my exam is on Friday”. Anything else: just ask.', chips: [{ label: 'Show the file tree', cmd: 'show the tree' }, { label: 'What do you remember?', cmd: 'what do you remember about me' }] }); done(id); return; }
     // requests the agents own (sandboxed code, writing a note) are not file-system plans
-    const agentFirst = agentsEnabled() && !libFolder && (/```/.test(q) || (planRules(q).some(p => p.agent === 'scribe') && !plan.steps.some(st => /^fs\.(cd|capture|move|copy|mkdir|rename|delete)$/.test(st.action))));
+    const agentFirst = (agentsEnabled() || !!opts.image) && !libFolder && (!!opts.image || /```/.test(q) || (planRules(q).some(p => p.agent === 'scribe') && !plan.steps.some(st => /^fs\.(cd|capture|move|copy|mkdir|rename|delete)$/.test(st.action))));
     if (agentFirst) fsPlan = false;
     let acting = !agentFirst && (fsPlan || known); if (libFolder) { plan = { version: 1, goal: q, planner: 'offline', steps: [{ id: 's1', action: 'app.command', label: q, args: { command: q }, status: 'pending' }] }; acting = true; }
     if (!acting && !agentFirst && IMPERATIVE.test(q)) { const mp = await modelPlan(q); if (mp) { plan = mp; acting = true; } }
@@ -193,7 +204,7 @@ export async function send(raw: string, via: 'voice' | 'text' = 'text', opts: { 
       node('learn', 'done', 'episode stored'); memory.add(`Asked FRIDAY to: ${q.slice(0, 90)}`, 'episode'); done(id); return;
     }
     node('plan', 'done', 'conversation'); node('act', 'skipped');
-    if (agentsEnabled()) { const c0 = classify(q); const o0 = askCore(await getIndex(), q); if (agentFirst || (o0.kind !== 'chat' && o0.kind !== 'calc')) { await agentChat(q, c0, o0, opts); return; } }
+    if (agentsEnabled() || opts.image) { const c0 = classify(q); const o0 = askCore(await getIndex(), q); if (agentFirst || (o0.kind !== 'chat' && o0.kind !== 'calc')) { await agentChat(q, c0, o0, opts); return; } }
 
     // ---- CHAT: recall → reason → critic
     node('recall', 'active'); const ctxClass = classify(q); const ix = await getIndex(); const off = askCore(ix, q);
@@ -236,10 +247,13 @@ export const welcome = () => { const n = memory.name(); return `${n ? `Hello ${n
 
 /* ---------------- background-while-open: reminders and study nudges ---------------- */
 let loopOn = false;
+/** Native notification: the desktop app's bridge when present, otherwise the browser Notification API (only while a tab is open). */
+function notifyNative(title: string, body: string) { try { const d = (window as unknown as { nmDesktop?: { notify(t: string, b: string): unknown } }).nmDesktop; if (d) { void d.notify(title, body); return; } if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body }); } catch { /* notifications blocked */ } }
 export function startBackground() {
   if (loopOn || typeof window === 'undefined') return; loopOn = true;
-  const check = () => { for (const r of reminders.due()) { const id = add({ who: 'bot', text: `⏰ Reminder: ${r.text}` }); done(id); try { if ('Notification' in window && Notification.permission === 'granted') new Notification('FRIDAY reminder', { body: r.text }); } catch { /* notifications blocked */ } } };
-  check(); setInterval(check, 20_000);
+  const check = () => { for (const r of reminders.due()) { const id = add({ who: 'bot', text: `⏰ Reminder: ${r.text}` }); done(id); notifyNative('FRIDAY reminder', r.text); } };
+  const nudgeDaily = () => { try { const h = new Date().getHours(); const day = new Date().toDateString(); if (h >= 9 && localStorage.getItem('nm_nudge_day') !== day) { const n = deck.nudges(); localStorage.setItem('nm_nudge_day', day); if (n.length) notifyNative('FRIDAY study nudge', n[0]); } } catch { /* storage */ } };
+  check(); nudgeDaily(); setInterval(() => { check(); nudgeDaily(); }, 20_000);
   try { if (!sessionStorage.getItem('nm_nudged')) { const n = deck.nudges(); if (n.length) { add({ who: 'bot', text: 'Study nudges:\n' + n.slice(0, 3).map(x => '• ' + x).join('\n'), chips: [{ label: 'Open Tutor', cmd: '__tab__ tutor' }] }); sessionStorage.setItem('nm_nudged', '1'); } } } catch { /* storage */ }
 }
 startBackground();

@@ -53,6 +53,7 @@ export async function detectLocal(extra?: string): Promise<Found[]> {
 /** Installed local models remembered from the last scan, and the small/large pair derived from them (null when only one size exists). */
 export function knownModels(): string[] { try { const a = JSON.parse(get('nm_friday_models') || '[]'); return Array.isArray(a) ? a.map(String) : []; } catch { return []; } }
 export function localTiers(): { small: string; big: string } | null { const u = get('nm_friday_small'), b = get('nm_friday_big'); if (u && b) return { small: u, big: b }; return pickTiers(knownModels()); }
+export const getEmbed = () => get('nm_friday_embed') || ''; export const setEmbed = (m: string) => set('nm_friday_embed', m);
 export const setTiers = (small: string, big: string) => { set('nm_friday_small', small); set('nm_friday_big', big); };
 /** Pick the best model name from an installed list (prefers instruct/chat models of a useful size). */
 export function pickModel(models: string[]): string {

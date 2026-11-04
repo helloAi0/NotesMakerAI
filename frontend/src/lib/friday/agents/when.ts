@@ -15,4 +15,5 @@ export function parseWhen(text: string, now = Date.now(), defaultHour = 9): When
   if (hasTime && time) { let at = atTime(base, h, mi); if (at < now) at += DAY; return { at, matched: time[0], hasTime }; }
   return null;
 }
-export const daysUntil = (at: number, now = Date.now()) => Math.max(0, Math.ceil((at - now) / DAY));
+/** Calendar days from today to the date of `at` (an exam on Friday 9:00 is “in 3 days” on Tuesday evening too). */
+export const daysUntil = (at: number, now = Date.now()) => { const d = (t: number) => { const x = new Date(t); x.setHours(0, 0, 0, 0); return x.getTime(); }; return Math.max(0, Math.round((d(at) - d(now)) / DAY)); };

@@ -12,11 +12,11 @@ import type { Passage } from './agents/retrieval';
 import { browserRunner } from './agents/sandbox';
 import { Deck } from './agents/tutor';
 import { Reminders } from './agents/reminders';
-import { Journal } from './agents/journal';
+import { Journal, idbBlobStore } from './agents/journal';
 import { RunStore } from './agents/orchestrator';
 import type { Deps, MemoryLike } from './agents/agents';
 
-export const deck = new Deck(); export const reminders = new Reminders(); export const journal = new Journal(vfs(), defaultKV()); export const runStore = new RunStore(defaultKV());
+export const deck = new Deck(); export const reminders = new Reminders(); export const journal = new Journal(vfs(), defaultKV(), 'nm_friday_journal', idbBlobStore()); export const runStore = new RunStore(defaultKV());
 const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 export const agentsEnabled = () => get('nm_friday_agents') !== '0';
 export const setAgentsEnabled = (v: boolean) => { try { localStorage.setItem('nm_friday_agents', v ? '1' : '0'); } catch { /* storage */ } };
@@ -25,7 +25,7 @@ let confirmHandler: ((why: string[]) => Promise<boolean>) | null = null;
 export const setConfirmHandler = (f: ((why: string[]) => Promise<boolean>) | null) => { confirmHandler = f; };
 
 let cache: { sig: string; r: Retriever; ix: Index } | null = null;
-function embedder() { const lc = router.getLocal(); if (!lc || lc.kind !== 'ollama') return undefined; const m = router.knownModels().find(x => /embed|nomic|bge|minilm/i.test(x)); return m ? ollamaEmbedder(lc.url, m) : undefined; }
+function embedder() { const lc = router.getLocal(); if (!lc || lc.kind !== 'ollama') return undefined; const pick = router.getEmbed(); if (pick === 'off') return undefined; const m = pick || router.knownModels().find(x => /embed|nomic|bge|minilm|mxbai|gte/i.test(x)); return m ? ollamaEmbedder(lc.url, m) : undefined; }
 export async function corpus(): Promise<{ r: Retriever; ix: Index }> {
   const ix = await getIndex(); const v = vfs(); await v.ready(); const files = v.walk('/', 8).filter(n => n.type === 'file' && n.text && n.text.length > 40);
   const sig = `${ix.all.docs.length}|${files.length}|${files.reduce((a, n) => a + n.modified, 0)}|${embedder()?.name ?? ''}`; if (cache && cache.sig === sig) return cache;
