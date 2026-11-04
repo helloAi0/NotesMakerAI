@@ -1,3 +1,4 @@
+import { ClassPanel } from './ClassPanel';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Paperclip, X as XIcon, Mic, MicOff, Send, Volume2, VolumeX, CheckCircle2, XCircle, Loader2, Trash2, Bot, BookOpen, ThumbsUp, ThumbsDown, RefreshCw, Copy, Circle, MinusCircle, Code2, Ear } from 'lucide-react';
 import { useDictation, useReader, SPEECH_LANGS } from '../lib/useVoice';
@@ -13,8 +14,8 @@ import { FilesPanel, MemoryPanel, LearningPanel, MapPanel, BrainPanel } from './
 import { WakeListener, wakeSupported } from '../lib/wakeWord';
 import { AgentsPanel, TutorPanel, EvalsPanel } from './FridayAgentsPanels';
 
-type Tab = 'chat' | 'files' | 'memory' | 'learning' | 'map' | 'brain' | 'agents' | 'tutor' | 'evals';
-const TABS: [Tab, string][] = [['chat', 'Chat'], ['files', 'Files'], ['memory', 'Memory'], ['learning', 'Learning'], ['map', 'Map'], ['agents', 'Agents'], ['tutor', 'Tutor'], ['evals', 'Evals'], ['brain', 'Brain']];
+type Tab = 'chat' | 'files' | 'memory' | 'learning' | 'map' | 'brain' | 'agents' | 'tutor' | 'evals' | 'class';
+const TABS: [Tab, string][] = [['chat', 'Chat'], ['files', 'Files'], ['memory', 'Memory'], ['learning', 'Learning'], ['map', 'Map'], ['agents', 'Agents'], ['tutor', 'Tutor'], ['class', 'Class'], ['evals', 'Evals'], ['brain', 'Brain']];
 const SUGGEST = ['Go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report', 'Explain backpropagation step by step', 'Open AI segmentation -> go to the image processing module -> set model to U-Net -> run simulation', 'Derive the heat equation', 'Remember that my exam is on Friday', 'What can you do?'];
 const SPOKEN = SPEECH_LANGS.filter(l => ['en-US', 'en-IN', 'hi-IN', 'ar-SA', 'mr-IN', 'fr-FR', 'de-DE'].includes(l.code));
 const REASONS: [Reason, string][] = [['too_long', 'Too long'], ['too_short', 'Too short'], ['too_technical', 'Too technical'], ['too_simple', 'Too simple'], ['wrong', 'Incorrect']];
@@ -117,7 +118,7 @@ export default function FridayConsole({ variant, prefix, onClose }: { variant: '
           <input data-testid={`${prefix}-input`} value={text} onChange={e => setText(e.target.value)} onPaste={e => { const f = Array.from(e.clipboardData.files).find(x => x.type.startsWith('image/')); if (f) { e.preventDefault(); setAttach({ file: f, url: URL.createObjectURL(f) }); } }} placeholder="Ask anything, or tell FRIDAY what to do…" className="flex-1 min-w-0 px-3 py-2 rounded-full border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/30" />
           <button data-testid={`${prefix}-send`} type="submit" disabled={busy || (!text.trim() && !attach)} aria-label="Send" className="p-2 rounded-full bg-amber-600 text-white disabled:opacity-40"><Send className="w-4 h-4" /></button>
         </form></>
-        : <div className="flex-1 min-h-0">{tab === 'files' ? <FilesPanel openPath={openPath} onOpened={() => setOpenPath(undefined)} /> : tab === 'memory' ? <MemoryPanel /> : tab === 'learning' ? <LearningPanel /> : tab === 'map' ? <MapPanel /> : tab === 'agents' ? <AgentsPanel focusRun={focusRun} /> : tab === 'tutor' ? <TutorPanel /> : tab === 'evals' ? <EvalsPanel /> : <BrainPanel onChange={refreshEngine} />}</div>}
+        : <div className="flex-1 min-h-0">{tab === 'files' ? <FilesPanel openPath={openPath} onOpened={() => setOpenPath(undefined)} /> : tab === 'memory' ? <MemoryPanel /> : tab === 'learning' ? <LearningPanel /> : tab === 'map' ? <MapPanel /> : tab === 'agents' ? <AgentsPanel focusRun={focusRun} /> : tab === 'tutor' ? <TutorPanel /> : tab === 'class' ? <ClassPanel /> : tab === 'evals' ? <EvalsPanel /> : <BrainPanel onChange={refreshEngine} />}</div>}
     </div>
   );
 }

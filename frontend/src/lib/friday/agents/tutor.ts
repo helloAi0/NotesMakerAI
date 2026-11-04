@@ -43,15 +43,18 @@ export interface Quiz { q: string; options: string[]; answer: number; cardId: st
 
 export interface Mistake { id: string; t: number; topic: string; question: string; given: string; correct: string }
 export interface Exam { id: string; topic: string; at: number }
-interface State { cards: Card[]; mistakes: Mistake[]; exams: Exam[] }
+interface State { cards: Card[]; mistakes: Mistake[]; exams: Exam[]; log: number[] }
 export class Deck {
-  s: State; private kv: KV; private key: string; constructor(kv: KV = defaultKV(), key = 'nm_friday_deck') { this.kv = kv; this.key = key; try { this.s = { cards: [], mistakes: [], exams: [], ...JSON.parse(kv.get(key) || '{}') }; } catch { this.s = { cards: [], mistakes: [], exams: [] }; } }
-  private save() { this.kv.set(this.key, JSON.stringify({ ...this.s, mistakes: this.s.mistakes.slice(-200) })); }
+  s: State; private kv: KV; private key: string; constructor(kv: KV = defaultKV(), key = 'nm_friday_deck') { this.kv = kv; this.key = key; try { this.s = { cards: [], mistakes: [], exams: [], log: [], ...JSON.parse(kv.get(key) || '{}') }; } catch { this.s = { cards: [], mistakes: [], exams: [], log: [] }; } }
+  private save() { this.kv.set(this.key, JSON.stringify({ ...this.s, mistakes: this.s.mistakes.slice(-200), log: this.s.log.slice(-1500) })); }
   cards() { return this.s.cards; }
   add(cards: Card[]): number { const have = new Set(this.s.cards.map(c => c.topic + '|' + c.front)); const fresh = cards.filter(c => !have.has(c.topic + '|' + c.front)); this.s.cards.push(...fresh); this.save(); return fresh.length; }
   remove(id: string) { this.s.cards = this.s.cards.filter(c => c.id !== id); this.save(); }
   due(now = Date.now(), limit = 20): Card[] { const weak = new Set(this.weakTopics(now).map(w => w.topic)); return this.s.cards.filter(c => c.due <= now).sort((a, b) => (weak.has(b.topic) ? 1 : 0) - (weak.has(a.topic) ? 1 : 0) || a.due - b.due).slice(0, limit); }
-  review(id: string, g: Grade, now = Date.now()): Card | null { const i = this.s.cards.findIndex(c => c.id === id); if (i < 0) return null; const c = schedule(this.s.cards[i], g, now); this.s.cards[i] = c; this.save(); return c; }
+  review(id: string, g: Grade, now = Date.now()): Card | null { const i = this.s.cards.findIndex(c => c.id === id); if (i < 0) return null; const c = schedule(this.s.cards[i], g, now); this.s.cards[i] = c; this.s.log.push(now); this.save(); return c; }
+  /** Review timestamps (study activity), for streaks and the progress report. */
+  reviewLog() { return this.s.log; }
+  activeDays(days = 30, now = Date.now()): number { const from = now - days * DAY; return new Set(this.s.log.filter(t => t >= from).map(t => new Date(t).toDateString())).size; }
   recordMistake(m: Omit<Mistake, 'id' | 't'>, now = Date.now()) { this.s.mistakes.push({ ...m, id: uid(), t: now }); this.save(); }
   mistakes(topic?: string) { return topic ? this.s.mistakes.filter(m => m.topic === topic) : this.s.mistakes; }
   topics(): string[] { return [...new Set(this.s.cards.map(c => c.topic))]; }
