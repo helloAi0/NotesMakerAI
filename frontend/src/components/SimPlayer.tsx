@@ -188,7 +188,7 @@ export default function SimPlayer({ sim, onBack, initialValues, notebookContext 
   // Let the voice agent / help-bot drive this simulation (set sliders, run, press buttons ...).
   const liveRef = useRef({ playing, vals });
   liveRef.current = { playing, vals };
-  useEffect(() => { touch('sim', sim.id); }, [sim.id]);
+  useEffect(() => { touch('sim', sim.id); void import('../lib/friday/agentsRuntime').then(m => m.studentModel.record({ type: 'sim', ref: sim.id, topic: sim.title })).catch(() => {}); }, [sim.id, sim.title]);
   useEffect(() => register('sim', {
     sim,
     values: () => valsRef.current,

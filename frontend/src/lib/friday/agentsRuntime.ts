@@ -16,7 +16,10 @@ import { Journal, idbBlobStore } from './agents/journal';
 import { RunStore } from './agents/orchestrator';
 import type { Deps, MemoryLike } from './agents/agents';
 
-export const deck = new Deck(); export const reminders = new Reminders(); export const journal = new Journal(vfs(), defaultKV(), 'nm_friday_journal', idbBlobStore()); export const runStore = new RunStore(defaultKV());
+import { track } from '../analytics';
+import { StudentModel } from '../platform/model';
+export const deck = new Deck(); export const studentModel = new StudentModel(); deck.onEvent = e => { studentModel.record(e); if (e.type === 'quiz') track('quiz_done'); if (e.type === 'review') track('card_review'); if (e.type === 'review') studentModel.snapshot(deck); };
+export const deckUnused = 0; export const reminders = new Reminders(); export const journal = new Journal(vfs(), defaultKV(), 'nm_friday_journal', idbBlobStore()); export const runStore = new RunStore(defaultKV());
 const get = (k: string) => { try { return localStorage.getItem(k); } catch { return null; } };
 export const agentsEnabled = () => get('nm_friday_agents') !== '0';
 export const setAgentsEnabled = (v: boolean) => { try { localStorage.setItem('nm_friday_agents', v ? '1' : '0'); } catch { /* storage */ } };

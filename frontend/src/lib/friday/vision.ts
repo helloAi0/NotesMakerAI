@@ -4,6 +4,7 @@
  *  2. If a vision-capable model is connected (Gemini, OpenAI-compatible, or a local model such as llava through Ollama) it also describes diagrams and charts.
  * The text and description are DATA (they go through the same injection filter as PDFs): instructions inside a screenshot are not followed.
  */
+import { resilientFetch } from '../net';
 import { PROVIDERS, baseUrlOf, geminiModels } from '../aiClient';
 import type { AiConfig } from '../aiClient';
 import * as router from './route';
@@ -21,14 +22,14 @@ export async function describeWithModel(cfg: AiConfig, jpegDataUrl: string, ques
   const b64 = jpegDataUrl.split(',')[1] ?? '';
   if (cfg.provider === 'gemini') {
     let err = new Error('no Gemini model accepted the image');
-    for (const m of geminiModels({ ...cfg, speed: 'fast' })) { const r = await fetch(`${PROMPT_BASE()}/models/${m}:generateContent`, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: question }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }] }) }); if (r.status === 404) { err = new Error(`model ${m} not available`); continue; } if (!r.ok) throw new Error(`vision ${r.status}: ${(await r.text().catch(() => '')).slice(0, 120)}`); const j = await r.json(); const t = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim(); if (t) return t; }
+    for (const m of geminiModels({ ...cfg, speed: 'fast' })) { const r = await resilientFetch(`${PROMPT_BASE()}/models/${m}:generateContent`, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: question }, { inline_data: { mime_type: 'image/jpeg', data: b64 } }] }] }) }); if (r.status === 404) { err = new Error(`model ${m} not available`); continue; } if (!r.ok) throw new Error(`vision ${r.status}: ${(await r.text().catch(() => '')).slice(0, 120)}`); const j = await r.json(); const t = (j?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('').trim(); if (t) return t; }
     throw err;
   }
   if (cfg.provider === 'anthropic') {
-    const r = await fetch(`${baseUrlOf(cfg)}/messages`, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-api-key': cfg.apiKey.trim(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: cfg.model || PROVIDERS.anthropic.defaultModel, max_tokens: 900, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }, { type: 'text', text: question }] }] }) });
+    const r = await resilientFetch(`${baseUrlOf(cfg)}/messages`, { method: 'POST', signal, headers: { 'content-type': 'application/json', 'x-api-key': cfg.apiKey.trim(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: cfg.model || PROVIDERS.anthropic.defaultModel, max_tokens: 900, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } }, { type: 'text', text: question }] }] }) });
     if (!r.ok) throw new Error(`vision ${r.status}`); const j = await r.json(); return String(j?.content?.[0]?.text ?? '').trim();
   }
-  const r = await fetch(`${baseUrlOf(cfg)}/chat/completions`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey.trim()}` }, body: JSON.stringify({ model: cfg.model || PROVIDERS[cfg.provider].defaultModel, max_tokens: 900, messages: [{ role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: jpegDataUrl } }] }] }) });
+  const r = await resilientFetch(`${baseUrlOf(cfg)}/chat/completions`, { method: 'POST', signal, headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey.trim()}` }, body: JSON.stringify({ model: cfg.model || PROVIDERS[cfg.provider].defaultModel, max_tokens: 900, messages: [{ role: 'user', content: [{ type: 'text', text: question }, { type: 'image_url', image_url: { url: jpegDataUrl } }] }] }) });
   if (!r.ok) throw new Error(`vision ${r.status}: ${(await r.text().catch(() => '')).slice(0, 120)}`); const j = await r.json(); return String(j?.choices?.[0]?.message?.content ?? '').trim();
 }
 const PROMPT_BASE = () => PROVIDERS.gemini.baseUrl;

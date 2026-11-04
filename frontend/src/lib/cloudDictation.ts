@@ -4,6 +4,7 @@
  * voice-activity detector and transcribes each phrase with the user's own AI key (Gemini, OpenAI, or any OpenAI-compatible
  * /audio/transcriptions server such as a local faster-whisper). Works in any browser, honours the chosen microphone.
  */
+import { resilientFetch } from './net';
 import { PROVIDERS, baseUrlOf, geminiModels } from './aiClient';
 import type { AiConfig } from './aiClient';
 import type { SttCallbacks, SttState } from './speechUtils';
@@ -46,8 +47,8 @@ export async function transcribeWav(cfg: AiConfig, wav: Uint8Array, lang: string
     const list = geminiModels({ ...cfg, speed: 'fast' }); const models = goodModel && list.includes(goodModel) ? [goodModel, ...list.filter(m => m !== goodModel)] : list;
     for (const model of models) {
       const url = `${PROVIDERS.gemini.baseUrl}/models/${model}:generateContent`, headers = { 'content-type': 'application/json', 'x-goog-api-key': cfg.apiKey.trim() };
-      let res = await fetch(url, { method: 'POST', headers, body: mk(!noThink.has(model)), signal });
-      if (res.status === 400 && !noThink.has(model)) { const t = await res.clone().text().catch(() => ''); if (/think/i.test(t)) { noThink.add(model); res = await fetch(url, { method: 'POST', headers, body: mk(false), signal }); } }
+      let res = await resilientFetch(url, { method: 'POST', headers, body: mk(!noThink.has(model)), signal });
+      if (res.status === 400 && !noThink.has(model)) { const t = await res.clone().text().catch(() => ''); if (/think/i.test(t)) { noThink.add(model); res = await resilientFetch(url, { method: 'POST', headers, body: mk(false), signal }); } }
       if (res.status === 404 || res.status === 400) { const txt = await res.text().catch(() => ''); if (/API key|API_KEY|permission|PERMISSION/i.test(txt)) throw new SttHttpError(401, txt.slice(0, 160)); lastErr = new SttHttpError(res.status, `Model ${model} rejected the request (${res.status}): ${txt.slice(0, 120)}`); continue; }
       if (!res.ok) throw new SttHttpError(res.status, (await res.text().catch(() => '')).slice(0, 200));
       goodModel = model;
@@ -60,7 +61,7 @@ export async function transcribeWav(cfg: AiConfig, wav: Uint8Array, lang: string
   const model = lsGet('nm_stt_model') || (cfg.provider === 'custom' && /whisper|transcri|parakeet|distil/i.test(cfg.model) ? cfg.model : cfg.provider === 'openai' ? 'whisper-1' : 'whisper-1');
   const form = new FormData(); form.append('file', new Blob([wav as BlobPart], { type: 'audio/wav' }), 'speech.wav'); form.append('model', model); form.append('response_format', 'json'); form.append('temperature', '0'); if (LANG_NAME[code]) form.append('language', code);
   const headers: Record<string, string> = {}; if (cfg.apiKey.trim()) headers.Authorization = `Bearer ${cfg.apiKey.trim()}`;
-  const res = await fetch(`${baseUrlOf(cfg)}/audio/transcriptions`, { method: 'POST', headers, body: form, signal });
+  const res = await resilientFetch(`${baseUrlOf(cfg)}/audio/transcriptions`, { method: 'POST', headers, body: form, signal });
   if (!res.ok) throw new SttHttpError(res.status, (await res.text().catch(() => '')).slice(0, 200));
   const j = await res.json(); return String(j?.text ?? '').trim();
 }

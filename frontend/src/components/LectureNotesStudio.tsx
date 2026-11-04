@@ -57,7 +57,7 @@ export default function LectureNotesStudio() {
     const build = (text: string, forId: string) => {
     const n = withSource(buildNotes(text, url), forId);
     if (!n.sections.length) { setMsg('I could not find any text in that transcript.'); return; }
-    setNotes(n); setTab('notes'); setPlay(0); try { localStorage.setItem(KEY, JSON.stringify({ url, raw: text, rawFor: forId })); } catch { setMsg('Notes built, but this browser has no room left to remember them.'); return; }
+    setNotes(n); setTab('notes'); setPlay(0); void import('../lib/friday/agentsRuntime').then(m => m.studentModel.record({ type: 'lecture', ref: forId, topic: n.title })).catch(() => {}); try { localStorage.setItem(KEY, JSON.stringify({ url, raw: text, rawFor: forId })); } catch { setMsg('Notes built, but this browser has no room left to remember them.'); return; }
     setMsg(`Built ${n.sections.length} section${n.sections.length > 1 ? 's' : ''} from ${n.cues.length} transcript lines${n.timed ? '' : ' (no timestamps found, so times are estimated at normal speaking speed)'}.`);
   };
   const abortRef = useRef<AbortController | null>(null); const [secs, setSecs] = useState(0);

@@ -1,10 +1,12 @@
 import { Component } from 'react';
 import type { ReactNode } from 'react';
+import { report } from '../lib/errors';
 
 /** Keeps one broken screen from blanking the whole app. */
 export default class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { err: Error | null }> {
   state = { err: null as Error | null };
   static getDerivedStateFromError(err: Error) { return { err }; }
+  componentDidCatch(err: Error, info: { componentStack?: string | null }) { report(err.message, 'ErrorBoundary', (err.stack ?? '') + (info.componentStack ?? ''), { view: this.props.resetKey }); }
   componentDidUpdate(prev: { resetKey?: string }) { if (prev.resetKey !== this.props.resetKey && this.state.err) this.setState({ err: null }); }
   render() {
     if (!this.state.err) return this.props.children;

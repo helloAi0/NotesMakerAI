@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { register } from './lib/agentBus';
 import { touch } from './lib/activity';
 import ErrorBoundary from './components/ErrorBoundary';
+import { installErrorTracking } from './lib/errors';
+import { track } from './lib/analytics';
 import type { ViewId } from './lib/agentBus';
 
 // Each big screen is its own chunk, downloaded the first time it is opened.
@@ -13,13 +15,15 @@ const FridayView = lazy(() => import('./components/FridayView'));
 const DashboardView = lazy(() => import('./components/DashboardView'));
 const PlannerView = lazy(() => import('./components/PlannerView'));
 const LectureNotesStudio = lazy(() => import('./components/LectureNotesStudio'));
+const PracticeView = lazy(() => import('./components/PracticeView'));
+const ProgressView = lazy(() => import('./components/ProgressView'));
 const GeneratorView = lazy(() => import('./components/GeneratorView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
 const SearchPalette = lazy(() => import('./components/SearchPalette'));
 const Loading = () => <div className="h-full flex items-center justify-center text-sm text-slate-500 p-8">Loading…</div>;
-import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity, Menu, X, Bot, Settings, Wifi, WifiOff, Clapperboard } from 'lucide-react';
+import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity, Menu, X, Bot, Settings, Wifi, WifiOff, Clapperboard, Target, TrendingUp } from 'lucide-react';
 
-const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', LayoutDashboard], ['friday', 'FRIDAY Assistant', Bot], ['generator', 'AI Note Generator', Sparkles], ['notebook', 'Digital Notebook', PenTool], ['lecture', 'Lecture to Notes', Clapperboard], ['simulations', 'Visuals Studio', Activity], ['planner', 'Study Planner', Calendar], ['library', 'PDF & Source Library', FileText]];
+const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', LayoutDashboard], ['friday', 'FRIDAY Assistant', Bot], ['generator', 'AI Note Generator', Sparkles], ['notebook', 'Digital Notebook', PenTool], ['lecture', 'Lecture to Notes', Clapperboard], ['simulations', 'Visuals Studio', Activity], ['planner', 'Study Planner', Calendar], ['library', 'PDF & Source Library', FileText], ['practice', 'Practice', Target], ['progress', 'My Progress', TrendingUp]];
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -27,7 +31,7 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
-  useEffect(() => { touch(); const on = () => setOnline(true), off = () => setOnline(false); window.addEventListener('online', on); window.addEventListener('offline', off); const k = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); } }; window.addEventListener('keydown', k); return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); window.removeEventListener('keydown', k); }; }, []);
+  useEffect(() => { installErrorTracking(() => viewRef.current); track('session_start'); touch(); const on = () => setOnline(true), off = () => setOnline(false); window.addEventListener('online', on); window.addEventListener('offline', off); const k = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setSearchOpen(true); } }; window.addEventListener('keydown', k); return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); window.removeEventListener('keydown', k); }; }, []);
   const setActiveTab = (t: string) => { setActiveTabRaw(t); setMenuOpen(false); };
   const viewRef = useRef(activeTab); viewRef.current = activeTab;
   useEffect(() => register('app', { view: () => viewRef.current as ViewId, navigate: v => { setActiveTabRaw(v); setMenuOpen(false); } }), []);
@@ -112,6 +116,8 @@ export default function App() {
               </div>
             )}
             {activeTab === 'planner' && <PlannerView />}
+            {activeTab === 'practice' && <PracticeView />}
+            {activeTab === 'progress' && <ProgressView />}
             {activeTab === 'library' && <PdfSourceLibrary />}
           </Suspense>
           </ErrorBoundary>
