@@ -5,19 +5,55 @@
   "main": "main.js",
   "private": true,
   "scripts": {
-    "build:web": "npm --prefix ../frontend run build",
+    "build:web": "npm --prefix ../frontend run build && npm run build:yt",
     "start": "npm run build:web && electron .",
     "start:fast": "electron .",
     "pack": "npm run build:web && electron-builder --dir",
-    "dist": "npm run build:web && electron-builder"
+    "dist": "npm run build:web && electron-builder",
+    "build:yt": "npx --prefix ../frontend esbuild ../frontend/server/ytTranscript.ts --bundle --platform=node --format=cjs --outfile=yt.cjs"
   },
-  "devDependencies": { "electron": "^33.0.0", "electron-builder": "^25.1.8" },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
   "build": {
     "appId": "ai.notesmaker.desktop",
     "productName": "Notes Maker AI",
-    "files": ["main.js", "preload.js", "icon.png", { "from": "../frontend/dist", "to": "web", "filter": ["**/*"] }],
-    "win": { "target": ["nsis"] },
-    "mac": { "target": ["dmg"], "category": "public.app-category.education" },
-    "linux": { "target": ["AppImage", "deb"], "category": "Education" }
+    "files": [
+      "main.js",
+      "preload.js",
+      "yt.cjs",
+      "icon.png",
+      {
+        "from": "../frontend/dist",
+        "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.education"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Education"
+    }
+  },
+  "homepage": "https://github.com/helloAi0/NotesMakerAI",
+  "author": {
+    "name": "Notes Maker AI",
+    "email": "noreply@notesmaker.ai"
   }
 }

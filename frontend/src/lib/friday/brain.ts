@@ -253,6 +253,7 @@ export function startBackground() {
   if (loopOn || typeof window === 'undefined') return; loopOn = true;
   const check = () => { for (const r of reminders.due()) { const id = add({ who: 'bot', text: `⏰ Reminder: ${r.text}` }); done(id); notifyNative('FRIDAY reminder', r.text); } };
   const nudgeDaily = () => { try { const h = new Date().getHours(); const day = new Date().toDateString(); if (h >= 9 && localStorage.getItem('nm_nudge_day') !== day) { const n = deck.nudges(); localStorage.setItem('nm_nudge_day', day); if (n.length) notifyNative('FRIDAY study nudge', n[0]); } } catch { /* storage */ } };
+  window.addEventListener('nm:resume', () => { check(); nudgeDaily(); }); window.addEventListener('online', check);
   check(); nudgeDaily(); setInterval(() => { check(); nudgeDaily(); }, 20_000);
   try { if (!sessionStorage.getItem('nm_nudged')) { const n = deck.nudges(); if (n.length) { add({ who: 'bot', text: 'Study nudges:\n' + n.slice(0, 3).map(x => '• ' + x).join('\n'), chips: [{ label: 'Open Tutor', cmd: '__tab__ tutor' }] }); sessionStorage.setItem('nm_nudged', '1'); } } } catch { /* storage */ }
 }

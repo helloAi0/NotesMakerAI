@@ -15,6 +15,7 @@ ok('preload exposes the desktop bridge', await pg.evaluate(() => !!(window.nmDes
 ok('page cannot reach node', await pg.evaluate(() => typeof require === 'undefined' && typeof process === 'undefined'));
 await pg.click('[data-testid=nav-friday]'); await pg.fill('[data-testid=friday-input]', 'what is 12 * 7'); await pg.click('[data-testid=friday-send]');
 ok('FRIDAY works inside the desktop app', await pg.waitForFunction(() => /84/.test(document.body.innerText), null, { timeout: 15000 }).then(() => true).catch(() => false));
+const yt = await pg.evaluate(async () => { const r = await fetch('/api/yt-transcript?v=dQw4w9WgXcQ'); return { type: r.headers.get('content-type') || '', body: (await r.text()).slice(0, 120) }; }); ok('YouTube caption route is bundled in the desktop app (JSON, not the page)', /json/.test(yt.type), JSON.stringify(yt));
 await pg.evaluate(() => localStorage.setItem('nm_friday_reminders', JSON.stringify([{ id: 'r1', text: 'revise enthalpy', at: Date.now() + 3000, done: false }])));
 await pg.reload(); await pg.waitForSelector('[data-testid=nav-friday]');
 await pg.evaluate(() => window.nmDesktopTest.closeWindow()); await sleep(600);

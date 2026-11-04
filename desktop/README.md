@@ -11,6 +11,5 @@ Electron shell around the web app. It keeps running in the **system tray** when 
 
 Build all three installers without owning all three machines: run the "Desktop installers" GitHub Action (Actions tab → Run workflow).
 
-Honest limits: it only works while the app is running (tray icon present); if you choose "Quit" or the computer is off/asleep, nothing fires.
-Tray menu → “Start with system” launches it hidden at login. The YouTube-caption server used in `npm run dev` is not bundled; Lecture to Notes then
-falls back to the model or pasted transcripts. Installers are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on first run.
+Honest limits: there is no server, so reminders fire only while the app's tray process is running. Quitting asks first and offers “Start with system”; the first run offers it too. A computer that is off cannot notify you; after sleep, everything that became due fires on wake. 
+Tray menu → “Start with system” launches it hidden at login. The YouTube-caption server is bundled (`yt.cjs`), so Lecture to Notes fetches captions here too. Installers are unsigned, so Windows SmartScreen / macOS Gatekeeper will warn on first run.

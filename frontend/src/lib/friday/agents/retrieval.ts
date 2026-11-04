@@ -50,12 +50,12 @@ export class Retriever {
   async search(q0: string, k = 5): Promise<Hit[]> {
     const cleaned = q0.replace(/\b(?:step[- ]by[- ]step|in detail|in depth|please|tell me|explain|describe|define|what (?:is|are|was|were|does)|what's|how (?:does|do|is)|show me|give me|can you|could you|about|simply|briefly)\b/gi, ' ').replace(/\s+/g, ' ').trim(); const q = cleaned.length >= 3 ? cleaned : q0;
     if (!this.passages.length || !q.trim()) return [];
-    const idx = new Map(this.passages.map((p, i) => [p.id, i])); const lists: { name: string; ids: string[] }[] = []; const via = new Map<string, Set<string>>();
+    const esim = new Map<string, number>(); const idx = new Map(this.passages.map((p, i) => [p.id, i])); const lists: { name: string; ids: string[] }[] = []; const via = new Map<string, Set<string>>();
     const note = (name: string, ids: string[]) => { lists.push({ name, ids }); for (const id of ids) (via.get(id) ?? via.set(id, new Set()).get(id)!).add(name); };
     const kw = this.bm.search(q, 30); note('keyword', kw.map(h => h.doc.id));
     const qv = hashVec(q); const dense = this.vecs.map((v, i) => ({ i, s: dot(qv, v) })).filter(x => x.s > 0.05).sort((a, b) => b.s - a.s).slice(0, 30); note('meaning', dense.map(d => this.passages[d.i].id));
     await this.ensureEmbeds();
-    if (this.ev && this.embedder) { try { const [qe] = await this.embedder.embed([q]); const e = norm(qe); const ds = this.ev.map((v, i) => ({ i, s: dot(e, v) })).sort((a, b) => b.s - a.s).slice(0, 30); note('embedding', ds.map(d => this.passages[d.i].id)); this.embedderUsed = true; } catch { this.embedderUsed = false; } }
+    if (this.ev && this.embedder) { try { const [qe] = await this.embedder.embed([q]); const e = norm(qe); const ds = this.ev.map((v, i) => ({ i, s: dot(e, v) })).sort((a, b) => b.s - a.s).slice(0, 30); note('embedding', ds.map(d => this.passages[d.i].id)); for (const d of this.ev.map((v, i) => ({ i, s: dot(e, v) }))) esim.set(this.passages[d.i].id, d.s); this.embedderUsed = true; } catch { this.embedderUsed = false; } }
     // pseudo-relevance feedback: expand the query with the strongest terms of the best first-pass documents
     const first = rrf(lists).slice(0, 3); if (first.length) {
       const qs = new Set(tokens(q).map(stem)); const tf = new Map<string, number>();
@@ -70,8 +70,8 @@ export class Retriever {
       const pos = qt.map(w => body.reduce<number[]>((a, x, i) => (x === w ? [...a, i] : a), [])).filter(a => a.length); let win = Infinity; if (pos.length) { for (const s of pos[0]) { let lo = s, hi = s; for (const a of pos.slice(1)) { const near = a.reduce((b, x) => (Math.abs(x - s) < Math.abs(b - s) ? x : b), a[0]); lo = Math.min(lo, near); hi = Math.max(hi, near); } win = Math.min(win, hi - lo + 1); } }
       const prox = pos.length > 1 ? Math.min(1, pos.length * 2 / win) : pos.length ? 1 : 0; const tset = new Set(tokens(p.title).map(stem)); const title = qt.length ? qt.filter(w => tset.has(w)).length / qt.length : 0;
       const rare = qt.filter(w => (this.df.get(w) ?? 0) > 0).sort((a, b) => this.idf(b) - this.idf(a))[0]; const miss = rare && !set.has(rare) ? 0.6 : 1;
-      const score = (0.4 * cov + 0.2 * phrase + 0.15 * prox + 0.1 * title + 0.15 * (f.score / top)) * miss;
-      const sim = dot(qv, this.vecs[idx.get(f.id)!]); const gate = cov >= 0.5 || sim >= 0.3 || (this.embedderUsed && (via.get(f.id)?.has('embedding') ?? false));
+      const lex = (0.4 * cov + 0.2 * phrase + 0.15 * prox + 0.1 * title + 0.15 * (f.score / top)) * miss; const es2 = esim.get(f.id); const score = es2 !== undefined ? 0.55 * Math.max(0, es2) + 0.45 * lex : lex;
+      const sim = dot(qv, this.vecs[idx.get(f.id)!]); const es = esim.get(f.id); const gate = es !== undefined ? es >= 0.45 || cov >= 0.5 : cov >= 0.5 || sim >= 0.3;
       return { passage: p, score: gate ? score : 0, quote: bestQuote(q, p.text), via: [...(via.get(f.id) ?? [])] } as Hit;
     }).filter(h => h.score > 0.12).sort((a, b) => b.score - a.score);
     // one best passage per source location, so citations are not five copies of the same page
