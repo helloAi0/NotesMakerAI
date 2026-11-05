@@ -13,7 +13,7 @@ export class Room {
   me: string; name: string; peers = new Map<string, string>(); inbox: { topic: string; cards: { front: string; back: string }[]; from: string }[] = []; challenge: { id: string; topic: string; questions: Extract<Msg, { t: 'challenge' }>['questions']; from: string } | null = null; results: Record<string, Board> = {};
   private tr: Transport[] = []; onChange: () => void = () => {};
   constructor(name: string, id = Math.random().toString(36).slice(2, 10)) { this.name = name.trim().slice(0, 30) || 'Student'; this.me = id; }
-  attach(t: Transport) { this.tr.push(t); t.onMessage(raw => this.recv(raw)); this.send({ t: 'hello', from: this.me, name: this.name }); }
+  attach(t: Transport) { this.tr.push(t); t.onMessage(raw => this.recv(raw)); const hi = () => this.send({ t: 'hello', from: this.me, name: this.name }); hi(); setTimeout(hi, 800); }
   private send(m: Msg) { const s = JSON.stringify(m); for (const t of this.tr) { try { t.send(s); } catch { /* peer gone */ } } }
   private recv(raw: string) {
     let m: Msg; try { m = JSON.parse(raw); } catch { return; } if (!m || typeof m !== 'object' || (m as { from?: string }).from === this.me) return;

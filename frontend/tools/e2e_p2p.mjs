@@ -1,0 +1,22 @@
+const { chromium } = await import('playwright').catch(() => import('/home/claude/.npm-global/lib/node_modules/playwright/index.mjs'));
+const BASE = process.env.BASE || 'http://127.0.0.1:5300';
+const mk = async () => { const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' }).catch(() => chromium.launch()); const p = await (await b.newContext()).newPage(); await p.goto(BASE); await p.evaluate(() => localStorage.setItem('nm_tour_done', '1')); await p.reload(); return [b, p]; };
+const open = async p => { await p.click('[data-testid=nav-teach]'); await p.click('[data-testid=teach-tab-rooms]'); await p.locator('details summary').first().click(); };
+const [b1, host] = await mk(), [b2, guest] = await mk();
+let ok = true; const t = (n, c) => { console.log(c ? 'PASS' : 'FAIL', n); if (!c) ok = false; };
+await open(host); await open(guest);
+await host.getByTestId('p2p-invite').click();
+await host.waitForFunction(() => document.querySelector('[data-testid=p2p-out]').value.length > 20, null, { timeout: 15000 });
+const inv = await host.getByTestId('p2p-out').inputValue();
+await guest.getByTestId('p2p-in').fill(inv); await guest.getByTestId('p2p-accept').click();
+await guest.waitForFunction(() => document.querySelector('[data-testid=p2p-out]').value.length > 20, null, { timeout: 15000 });
+const rep = await guest.getByTestId('p2p-out').inputValue();
+await host.getByTestId('p2p-in').fill(rep); await host.getByTestId('p2p-finish').click();
+await host.getByTestId('room-msg').waitFor({ timeout: 20000 }).catch(() => {});
+console.log('host msg:', await host.getByTestId('room-msg').textContent().catch(() => 'none'), '| guest msg:', await guest.getByTestId('room-msg').textContent().catch(() => 'none'));
+
+await new Promise(r => setTimeout(r, 5000));
+const peers = async p => p.getByTestId('room-peers').textContent().catch(() => '');
+console.log(await peers(host), '/', await peers(guest));
+t('host sees a peer', /,/.test(await peers(host)));
+await b1.close(); await b2.close(); process.exit(ok ? 0 : 1);
