@@ -53,7 +53,7 @@ export function buildGraph(o: { deck: Deck; events: Ev[]; sims: SimInfo[]; notes
   // notes
   for (const nt of o.notes) for (const t of topics) { const r = Math.max(relatedness(t, nt.title), relatedness(t, nt.text.slice(0, 3000)) * 0.8); if (r >= 0.6) { const id = 'n:' + nt.title; add({ id, kind: 'note', label: nt.title, weight: 1 }); edges.push({ a: id, b: 'c:' + t.toLowerCase(), kind: 'notes-on', w: r }); } }
   // exams
-  for (const e of o.deck.exams()) { const c = tid(e.topic); const id = 'e:' + e.topic.toLowerCase(); add({ id, kind: 'exam', label: `${e.topic} exam`, weight: 1, meta: new Date(e.at).toLocaleDateString() }); if (c) edges.push({ a: id, b: c, kind: 'exam-on', w: 1 }); else add({ id: 'c:' + e.topic.toLowerCase(), kind: 'concept', label: e.topic, weight: 1, mastery: 0, meta: 'no cards yet' }), edges.push({ a: id, b: 'c:' + e.topic.toLowerCase(), kind: 'exam-on', w: 1 });
+  for (const e of o.deck.exams()) { const c = tid(e.topic); const id = 'e:' + e.topic.toLowerCase(); add({ id, kind: 'exam', label: `${e.topic} exam`, weight: 1, meta: new Date(e.at).toLocaleDateString() }); if (c) edges.push({ a: id, b: c, kind: 'exam-on', w: 1 }); else { add({ id: 'c:' + e.topic.toLowerCase(), kind: 'concept', label: e.topic, weight: 1, mastery: 0, meta: 'no cards yet' }); edges.push({ a: id, b: 'c:' + e.topic.toLowerCase(), kind: 'exam-on', w: 1 }); }
   }
   return { nodes: [...nodes.values()], edges };
 }

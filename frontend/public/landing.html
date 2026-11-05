@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notes Maker AI — an offline AI tutor for STEM students</title>
+<meta name="description" content="Turn your notes into practice. Learn physics, chemistry and maths by predicting what simulations will do. Answers with sources, recomputed arithmetic, and an honest “I’m not sure”. Works offline.">
+<style>
+:root{--bg:#fbf9f5;--ink:#1e293b;--mute:#475569;--line:#fde68a;--brand:#b45309;--brand2:#d97706;--card:#fff;--ok:#047857}
+@media (prefers-color-scheme:dark){:root{--bg:#1c1917;--ink:#f5f5f4;--mute:#d6d3d1;--line:#57534e;--brand:#fbbf24;--brand2:#f59e0b;--card:#292524;--ok:#34d399}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+a{color:var(--brand)}main,header,footer{max-width:1040px;margin:0 auto;padding:0 20px}
+header{display:flex;align-items:center;justify-content:space-between;padding-top:20px;padding-bottom:12px;gap:12px;flex-wrap:wrap}
+.logo{font-weight:800;font-size:1.1rem}.btn{display:inline-block;padding:11px 20px;border-radius:12px;background:var(--brand2);color:#fff;font-weight:700;text-decoration:none}
+.btn.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.hero{padding:44px 0 28px}h1{font-size:clamp(2rem,5vw,3.2rem);line-height:1.1;margin:0 0 14px;letter-spacing:-.02em}
+.lead{font-size:1.15rem;color:var(--mute);max-width:46rem}.cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+section{padding:28px 0}h2{font-size:1.5rem;margin:0 0 14px}.grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}.card h3{margin:0 0 6px;font-size:1.05rem}.card p{margin:0;color:var(--mute);font-size:.95rem}
+.tag{display:inline-block;font-size:.72rem;padding:2px 8px;border-radius:99px;margin-left:6px;vertical-align:middle}.live{background:#d1fae5;color:#065f46}.plan{background:#e2e8f0;color:#334155}.part{background:#fef3c7;color:#92400e}
+table{width:100%;border-collapse:collapse;font-size:.92rem}td,th{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.note{background:var(--card);border:1px dashed var(--brand2);border-radius:12px;padding:12px 14px;color:var(--mute);font-size:.92rem}
+footer{padding:28px 20px 48px;color:var(--mute);font-size:.88rem}:focus-visible{outline:3px solid var(--brand2);outline-offset:2px}
+</style>
+</head>
+<body>
+<header><div class="logo">📘 Notes Maker AI</div><nav><a href="#how">How it works</a> · <a href="#honest">Where we are</a> · <a href="#pricing">Pricing</a> · <a class="btn" href="./">Open the app</a></nav></header>
+<main>
+<div class="hero">
+<h1>The AI tutor that learns <em>your</em> notes, and shows its sources.</h1>
+<p class="lead">Drop in a PDF or lecture. Get flashcards and a quiz in two minutes. Learn physics by <b>predicting</b> what a simulation will do, then seeing where your thinking differed. Works offline, so it fits slow connections and keeps your notes on your own device.</p>
+<div class="cta"><a class="btn" href="./">Try it now</a><a class="btn alt" href="#honest">Read where we honestly are</a></div>
+</div>
+
+<section id="how"><h2>What makes it different</h2><div class="grid">
+<div class="card"><h3>Predict, run, explain</h3><p>Pick a simulation, predict what changes, run it, and get an explanation of the gap. 177 simulations across physics, chemistry, maths and engineering.</p></div>
+<div class="card"><h3>Answers you can check</h3><p>Every answer from your notes shows its source and page. Arithmetic is recomputed. When the model is unsure, it says so instead of guessing.</p></div>
+<div class="card"><h3>A model of you</h3><p>A knowledge graph links your concepts, mistakes, simulations, notes and exam dates, then tells you what to work on next.</p></div>
+<div class="card"><h3>Mock exams that explain your marks</h3><p>Timed papers from your weak topics, graded automatically, with a report on <i>how</i> you lose marks: rushing, concept gaps, repeats.</p></div>
+<div class="card"><h3>Find the exact wrong line</h3><p>Photograph or type your working. Each line is recomputed and the first mistake is pointed out.</p></div>
+<div class="card"><h3>Teaches in your language</h3><p>Hindi, Marathi, Tamil, Telugu, Bengali, Gujarati, Kannada, Malayalam, Punjabi and Urdu, with the voices installed on your device.</p></div>
+</div></section>
+
+<section><h2>For teachers and institutions</h2><div class="grid">
+<div class="card"><h3>Course pack from a syllabus</h3><p>Paste a syllabus, get units, flashcards, simulation assignments and a week-by-week exam plan, as one small file.</p></div>
+<div class="card"><h3>Class dashboard</h3><p>See weak topics and students who need attention from their progress files. No student data leaves their devices.</p></div>
+<div class="card"><h3>A pilot kit that measures</h3><p>The same test before and after, plus a survey, giving the average gain with a confidence interval and an honest verdict.</p></div>
+</div></section>
+
+<section id="honest"><h2>Where we honestly are</h2>
+<table><tbody>
+<tr><td>Working product (web and desktop)</td><td><span class="tag live">live</span></td></tr>
+<tr><td>Course packs, class dashboard, pilot kit, study rooms, plugins, encrypted backup</td><td><span class="tag live">live</span></td></tr>
+<tr><td>Accounts and a hosted service</td><td><span class="tag part">partly built</span></td></tr>
+<tr><td>Payments</td><td><span class="tag plan">planned</span></td></tr>
+<tr><td>Results from real students</td><td><span class="tag plan">no pilot yet</span></td></tr>
+</tbody></table>
+<p class="note">We have not run a pilot, so we publish no user numbers or learning-gain claims. We are looking for two institutions to run a 4–6 week pilot with us. The pilot kit is built to produce honest before/after numbers.</p></section>
+
+<section id="pricing"><h2>Pricing (proposed)</h2>
+<div class="grid">
+<div class="card"><h3>Free</h3><p><b>₹0</b><br>Offline tutor, simulations, flashcards, mock exams, progress. Your data stays on your device.</p></div>
+<div class="card"><h3>Student Plus</h3><p><b>₹149 / month</b> (proposed)<br>Hosted AI so no key is needed and encrypted sync across devices. <span class="tag plan">planned</span></p></div>
+<div class="card"><h3>Institution</h3><p><b>₹99 / student / month</b> (proposed)<br>Accounts, live class dashboard, admin console and support. <span class="tag plan">planned</span></p></div>
+</div>
+<p class="note">Prices are proposals to test with pilot users. Nothing can be bought yet.</p></section>
+
+<section><h2>Limits, stated plainly</h2>
+<p class="note">FRIDAY is a language model plus tools, memory and verification checks. It is not general intelligence and it can still be wrong. Our checks reduce errors; they do not remove them. Check anything that matters.</p></section>
+</main>
+<footer>© Notes Maker AI · <a href="./">Open the app</a> · Contact: add your email here</footer>
+</body>
+</html>

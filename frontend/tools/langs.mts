@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { detectLang, tutorInstruction, voiceReport, phrase, LANGS, PHRASES, langByCode } from '../src/lib/platform/langs.ts';
+assert.equal(detectLang('ऊष्मागतिकी का पहला नियम ऊर्जा संरक्षण है और यह सही है')?.code, 'hi'); assert.equal(detectLang('ऊष्मागतिकीचा पहिला नियम आहे आणि तो ऊर्जा संवर्धन काय सांगतो')?.code, 'mr');
+assert.equal(detectLang('வெப்ப இயக்கவியலின் முதல் விதி')?.code, 'ta'); assert.equal(detectLang('ఉష్ణగతిక శాస్త్రం మొదటి నియమం')?.code, 'te'); assert.equal(detectLang('তাপগতিবিদ্যার প্রথম সূত্র')?.code, 'bn'); assert.equal(detectLang('ઉષ્માગતિશાસ્ત્રનો પહેલો નિયમ')?.code, 'gu');
+assert.equal(detectLang('ಉಷ್ಣಬಲವಿಜ್ಞಾನದ ಮೊದಲ ನಿಯಮ')?.code, 'kn'); assert.equal(detectLang('താപഗതികത്തിന്റെ ആദ്യ നിയമം')?.code, 'ml'); assert.equal(detectLang('ਥਰਮੋਡਾਇਨਾਮਿਕਸ ਦਾ ਪਹਿਲਾ ਨਿਯਮ')?.code, 'pa'); assert.equal(detectLang('حرکیات کا پہلا قانون')?.code, 'ur');
+assert.equal(detectLang('The first law of thermodynamics'), null); assert.equal(detectLang('E = mc² and 12 × 7 = 84'), null); assert.equal(detectLang('ok'), null); assert.equal(detectLang('The law है'), null, 'mostly Latin text is not Hindi');
+assert.match(tutorInstruction('ta'), /Tamil \(தமிழ்\)/); assert.match(tutorInstruction('hi'), /formulas, symbols, units/); assert.equal(tutorInstruction(''), ''); assert.equal(tutorInstruction('xx'), '');
+for (const l of LANGS) assert.ok(PHRASES[l.code] && Object.values(PHRASES[l.code]).every(s => s.length > 2 && l.script.test(s)), `phrases in ${l.name} use their own script`); assert.equal(phrase('mr', 'correct'), 'बरोबर!'); assert.equal(phrase('zz', 'correct'), 'Correct!'); assert.equal(langByCode('hi-IN')?.code, 'hi');
+const vr = voiceReport([{ name: 'Google हिन्दी', lang: 'hi-IN', localService: false }, { name: 'Lekha', lang: 'hi_IN', localService: true }, { name: 'Alex', lang: 'en-US', localService: true }]);
+assert.equal(vr.find(v => v.lang.code === 'hi')!.voice, 'Lekha'); assert.equal(vr.find(v => v.lang.code === 'hi')!.offline, true); const ta = vr.find(v => v.lang.code === 'ta')!; assert.equal(ta.voice, null); assert.match(ta.advice, /Install one/);
+assert.match(voiceReport([{ name: 'x', lang: 'ta-IN', localService: false }]).find(v => v.lang.code === 'ta')!.advice, /online-only/);
+console.log('langs OK');

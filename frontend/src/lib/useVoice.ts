@@ -106,7 +106,7 @@ export function useDictation(onFinal: (text: string, alternatives: string[]) => 
 export const SPEECH_LANGS: { code: string; label: string }[] = [
   { code: 'en-US', label: 'English (US)' }, { code: 'en-GB', label: 'English (UK)' }, { code: 'en-IN', label: 'English (India)' },
   { code: 'hi-IN', label: 'Hindi' }, { code: 'ar-SA', label: 'Arabic' }, { code: 'gu-IN', label: 'Gujarati' }, { code: 'mr-IN', label: 'Marathi' },
-  { code: 'ta-IN', label: 'Tamil' }, { code: 'te-IN', label: 'Telugu' }, { code: 'bn-IN', label: 'Bengali' },
+  { code: 'ta-IN', label: 'Tamil' }, { code: 'te-IN', label: 'Telugu' }, { code: 'bn-IN', label: 'Bengali' }, { code: 'kn-IN', label: 'Kannada' }, { code: 'ml-IN', label: 'Malayalam' }, { code: 'pa-IN', label: 'Punjabi' }, { code: 'ur-PK', label: 'Urdu' },
   { code: 'es-ES', label: 'Spanish' }, { code: 'fr-FR', label: 'French' }, { code: 'de-DE', label: 'German' },
 ];
 

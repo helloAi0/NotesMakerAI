@@ -90,6 +90,16 @@ export default function LectureNotesStudio() {
   const loadSample = () => { setRaw(SAMPLE_TRANSCRIPT); setRawFor('sample'); setUrl(''); setNotes(null); setMsg('Sample thermodynamics lecture loaded (it is not a real video). Press Make notes.'); };
   const onFile = async (f?: File | null) => { if (!f) return; const t = await f.text(); setRaw(t); setRawFor(''); setMsg(`Loaded ${f.name} (${t.length.toLocaleString()} characters). Press Make notes.`); };
   const clear = () => { setNotes(null); setRaw(''); setRawFor(''); setUrl(''); setMsg(''); try { localStorage.removeItem(KEY); } catch { /* ignore */ } };
+  const [everything, setEverything] = useState('');
+  const makeEverything = async () => {
+    if (!notes) return; setEverything('Working…');
+    try {
+      const [{ lectureToEverything }, rt, { SIMS }, planner] = await Promise.all([import('../lib/platform/pipeline'), import('../lib/friday/agentsRuntime'), import('../sims/registry'), import('../lib/planner')]);
+      const ev = lectureToEverything(notes, SIMS.map(s => ({ id: s.id, title: s.title, tags: s.tags, subject: s.subject })));
+      const added = rt.deck.add(ev.cards); for (const p of ev.plan) planner.addTask({ title: p.title, due: p.due, subject: ev.topic, kind: 'task' });
+      setEverything(`Made ${added} flashcard${added === 1 ? '' : 's'}${ev.sims.length ? `, found ${ev.sims.length} related simulation${ev.sims.length > 1 ? 's' : ''} (${ev.sims.map(x => x.title).join(', ')})` : ''} and a ${ev.plan.length}-step study plan in your Planner. Open Practice or the Tutor to start your first quiz.`);
+    } catch (e) { setEverything(`Could not do that: ${(e as Error).message}`); }
+  };
   const refine = async () => {
     const cfg = llmConfig(); if (!cfg || !notes) { setMsg('Add an AI key in Settings to rewrite the notes with AI.'); return; }
     setAiBusy('0%'); try { const r = await aiRefine(cfg, notes, (d, t) => setAiBusy(`${Math.round(d / t * 100)}%`)); setNotes(r); setMsg('Sections rewritten by your AI model. Check the formulas against the video.'); } catch (e) { setMsg(`AI rewrite failed: ${(e as Error).message}`); } finally { setAiBusy(''); }
@@ -126,6 +136,7 @@ export default function LectureNotesStudio() {
               <button type="button" data-testid="lec-sample" onClick={loadSample} className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold hover:bg-slate-50">Try a sample lecture</button>
               <input ref={fileRef} type="file" accept=".srt,.vtt,.txt,.md,text/plain" className="hidden" onChange={e => { void onFile(e.target.files?.[0]); e.target.value = ''; }} />
             </div>
+            {everything && <p role="status" data-testid="lec-everything-msg" className="text-xs text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">{everything}</p>}
             {msg && <p role="status" data-testid="lec-msg" className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{msg}</p>}
           </form>
 
@@ -154,6 +165,7 @@ export default function LectureNotesStudio() {
                     <button onClick={save} className="px-3 py-1.5 rounded-lg border border-slate-300 font-semibold flex items-center gap-1"><Save className="w-3 h-3" /> Save</button>
                     <button onClick={() => { void navigator.clipboard?.writeText(md); setMsg('Notes copied as Markdown.'); }} className="px-3 py-1.5 rounded-lg border border-slate-300 font-semibold flex items-center gap-1"><Copy className="w-3 h-3" /> Copy</button>
                     <button onClick={download} className="px-3 py-1.5 rounded-lg border border-slate-300 font-semibold flex items-center gap-1"><Download className="w-3 h-3" /> .md</button>
+                    <button data-testid="lec-everything" onClick={() => void makeEverything()} title="Flashcards, a first quiz, simulation suggestions and a spaced study plan from this lecture" className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-900 text-sm font-semibold">Make cards, quiz &amp; study plan</button>
                     <button data-testid="lec-ai" onClick={() => void refine()} disabled={!!aiBusy} title={ai ? 'Rewrite titles, summaries and key points with your AI model' : 'Add an AI key in Settings to enable'} className={`px-3 py-1.5 rounded-lg border font-semibold flex items-center gap-1 ${ai ? 'border-red-300 text-red-700 bg-red-50' : 'border-slate-200 text-slate-400'}`}>{aiBusy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Wand2 className="w-3 h-3" />} {aiBusy ? `Rewriting ${aiBusy}` : 'Improve with AI'}</button>
                   </div>
                 </div>

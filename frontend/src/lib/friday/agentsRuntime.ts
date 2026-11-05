@@ -17,6 +17,7 @@ import { RunStore } from './agents/orchestrator';
 import type { Deps, MemoryLike } from './agents/agents';
 
 import { track } from '../analytics';
+import { tutorInstruction, getTutorLang } from '../platform/langs';
 import { StudentModel } from '../platform/model';
 export const deck = new Deck(); export const studentModel = new StudentModel(); deck.onEvent = e => { studentModel.record(e); if (e.type === 'quiz') track('quiz_done'); if (e.type === 'review') track('card_review'); if (e.type === 'review') studentModel.snapshot(deck); };
 export const deckUnused = 0; export const reminders = new Reminders(); export const journal = new Journal(vfs(), defaultKV(), 'nm_friday_journal', idbBlobStore()); export const runStore = new RunStore(defaultKV());
@@ -41,7 +42,7 @@ export function buildDeps(o: { memory: MemoryLike; persona: string; style?: stri
   const scale = o.engine?.engine === 'local' ? 8 : o.engine?.engine === 'cloud' ? 2 : 1; // an 8B model on a CPU needs minutes, not seconds
   return {
     timeScale: scale,
-    now: Date.now, retriever: async () => (await corpus()).r, calc, runCode: browserRunner, memory: o.memory, deck, reminders, extractFacts, persona: o.engine && o.engine.engine !== 'offline' ? `${o.persona} You are currently running on: ${o.engine.label}.` : o.persona, style: o.style, deep: router.getDeep(),
+    now: Date.now, retriever: async () => (await corpus()).r, calc, runCode: browserRunner, memory: o.memory, deck, reminders, extractFacts, persona: (o.engine && o.engine.engine !== 'offline' ? `${tutorInstruction(getTutorLang())} ` : '') + (o.engine && o.engine.engine !== 'offline' ? `${o.persona} You are currently running on: ${o.engine.label}.` : o.persona), style: o.style, deep: router.getDeep(),
     llm: async (prompt, opts) => { const cur = await router.current(); if (cur.engine === 'offline') return null; const g = await router.route(prompt, { stream: false, json: opts?.json, tier: opts?.tier, temperature: opts?.temperature, maxTokens: 1200 }); return g && g.engine !== 'offline' && g.text ? g.text : null; },
     sim: { run: async c => { const r = await runOne(c); return { ok: r.ok, message: r.message }; }, read: () => snapshot() },
     fs: { vfs: vfs(), journal }, confirm: why => (confirmHandler ? confirmHandler(why) : Promise.resolve(false)),

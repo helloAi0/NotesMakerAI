@@ -1,3 +1,4 @@
+import { detectLang } from '../lib/platform/langs';
 import { ClassPanel } from './ClassPanel';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Paperclip, X as XIcon, Mic, MicOff, Send, Volume2, VolumeX, CheckCircle2, XCircle, Loader2, Trash2, Bot, BookOpen, ThumbsUp, ThumbsDown, RefreshCw, Copy, Circle, MinusCircle, Code2, Ear } from 'lucide-react';
@@ -17,7 +18,7 @@ import { AgentsPanel, TutorPanel, EvalsPanel } from './FridayAgentsPanels';
 type Tab = 'chat' | 'files' | 'memory' | 'learning' | 'map' | 'brain' | 'agents' | 'tutor' | 'evals' | 'class';
 const TABS: [Tab, string][] = [['chat', 'Chat'], ['files', 'Files'], ['memory', 'Memory'], ['learning', 'Learning'], ['map', 'Map'], ['agents', 'Agents'], ['tutor', 'Tutor'], ['class', 'Class'], ['evals', 'Evals'], ['brain', 'Brain']];
 const SUGGEST = ['Go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report', 'Explain backpropagation step by step', 'Open AI segmentation -> go to the image processing module -> set model to U-Net -> run simulation', 'Derive the heat equation', 'Remember that my exam is on Friday', 'What can you do?'];
-const SPOKEN = SPEECH_LANGS.filter(l => ['en-US', 'en-IN', 'hi-IN', 'ar-SA', 'mr-IN', 'fr-FR', 'de-DE'].includes(l.code));
+const SPOKEN = SPEECH_LANGS.filter(l => ['en-US', 'en-IN', 'hi-IN', 'mr-IN', 'ta-IN', 'te-IN', 'bn-IN', 'gu-IN', 'kn-IN', 'ml-IN', 'pa-IN', 'ur-PK', 'ar-SA', 'fr-FR', 'de-DE'].includes(l.code));
 const REASONS: [Reason, string][] = [['too_long', 'Too long'], ['too_short', 'Too short'], ['too_technical', 'Too technical'], ['too_simple', 'Too simple'], ['wrong', 'Incorrect']];
 const speakable = (t: string) => t.replace(/```[\s\S]*?```/g, ' code block. ').replace(/\$\$?[^$]+\$\$?/g, ' formula ').replace(/[*#_`>|•→“”]/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -63,7 +64,7 @@ export default function FridayConsole({ variant, prefix, onClose }: { variant: '
   const dict = useDictation(t => { void send(t, 'voice'); });
   const listening = dict.state === 'listening' || dict.state === 'starting'; const dictStartRef = useRef(dict.start); dictStartRef.current = dict.start;
   useEffect(() => { if (wake && !listening && !busy && wakeRef.current && !wakeRef.current.running) wakeRef.current.start(); }, [wake, listening, busy]);
-  const say = useCallback((m: Msg) => { const segs = splitSentences(speakable(m.text).slice(0, 900)).slice(0, 10).map((s, i) => ({ id: `f${m.id}-${i}`, text: s })); if (segs.length) reader.playFrom(segs, 0); }, [reader]);
+  const say = useCallback((m: Msg) => { const dl = detectLang(m.text); if (dl) reader.setLang(dl.bcp); const segs = splitSentences(speakable(m.text).slice(0, 900)).slice(0, 10).map((s, i) => ({ id: `f${m.id}-${i}`, text: s })); if (segs.length) reader.playFrom(segs, 0); }, [reader]);
   const refreshEngine = useCallback(() => { void router.current().then(c => setEngine(c.label)); setOnline(router.isOnline()); bump(x => x + 1); }, []);
   useEffect(() => { refreshEngine(); }, [refreshEngine]);
   useEffect(() => onReply((m: Msg) => { if (m.who === 'bot' && m.text && (speakRef.current || handsRef.current) && reader.supported) say(m); }), [reader, say]);

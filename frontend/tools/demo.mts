@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import { enableDemo, disableDemo, isDemo, DECK_KEY, MODEL_KEY } from '../src/lib/platform/demo.ts';
+import { Deck } from '../src/lib/friday/agents/tutor.ts';
+import { StudentModel, outcomes, buildGraph, recommend } from '../src/lib/platform/model.ts';
+import { testKV } from '../src/lib/friday/learn.ts';
+const kv = testKV(); kv.set(DECK_KEY, '{"cards":[],"mistakes":[],"exams":[{"id":"real","topic":"My real exam","at":1}],"log":[]}'); kv.set(MODEL_KEY, '{"ev":[{"t":1,"type":"note"}],"mast":[]}');
+const r = enableDemo(kv); assert.ok(r.cards >= 10 && isDemo(kv)); assert.equal(enableDemo(kv).cards, 0, 'enabling twice does not overwrite the saved backup');
+const d = new Deck(kv, DECK_KEY), m = new StudentModel(kv, MODEL_KEY); const o = outcomes(m); assert.equal(o.evidence, 'usable', JSON.stringify(o)); assert.ok(o.quiz.gain! > 0.2 && o.reviews > 100 && o.activeDays30 >= 15);
+const g = buildGraph({ deck: d, events: m.events(), sims: [], notes: [] }); assert.equal(recommend(g, 1)[0].topic, 'Optics', 'the weak, exam-bound topic is recommended first'); assert.ok(d.nudges()[0].includes('Optics'));
+assert.ok(disableDemo(kv) && !isDemo(kv)); const d2 = new Deck(kv, DECK_KEY); assert.equal(d2.cards().length, 0); assert.equal(d2.exams()[0].topic, 'My real exam', 'real data restored exactly'); assert.equal(new StudentModel(kv, MODEL_KEY).events().length, 1); assert.equal(disableDemo(kv), false);
+console.log('demo OK');
