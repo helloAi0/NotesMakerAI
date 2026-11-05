@@ -1,7 +1,7 @@
 /* Local error tracking. Crashes are written to a small on-device log (no notes, no keys — messages only, scrubbed).
    If the user opts in AND a Sentry DSN is configured, the same scrubbed events are sent to Sentry. */
-import { defaultKV } from './friday/learn';
-import type { KV } from './friday/learn';
+import { defaultKV } from './kv';
+import type { KV } from './kv';
 
 export interface ErrEvent { t: number; msg: string; stack?: string; where: string; view?: string }
 const LOG = 'nm_errlog', CFG = 'nm_errcfg';

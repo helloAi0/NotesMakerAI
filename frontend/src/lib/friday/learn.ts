@@ -8,10 +8,10 @@
  */
 import { Bm25 } from '../textTools';
 
-export interface KV { get(k: string): string | null; set(k: string, v: string): void }
-const memKV = (): KV => { const m = new Map<string, string>(); return { get: k => m.get(k) ?? null, set: (k, v) => { m.set(k, v); } }; };
-const lsKV = (): KV => ({ get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* quota */ } } });
-export const defaultKV = (): KV => (typeof localStorage !== 'undefined' ? lsKV() : memKV());
+import { memKV, defaultKV } from '../kv';
+import type { KV } from '../kv';
+export type { KV };
+export { defaultKV };
 export const testKV = memKV;
 
 /* ================================================================== */

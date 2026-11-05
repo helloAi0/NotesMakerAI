@@ -1,8 +1,8 @@
 /* Local profiles and roles. This is NOT authentication: it lives in the browser, so anyone with the device can change it.
    It separates what a student and a teacher SEE, adds an optional PIN to the teacher area, and puts the right name on reports.
    Real accounts (server, passwords, class membership) are the next step: see server-api/. */
-import { defaultKV } from '../friday/learn';
-import type { KV } from '../friday/learn';
+import { defaultKV } from '../kv';
+import type { KV } from '../kv';
 export type Role = 'student' | 'teacher';
 export interface Profile { id: string; name: string; role: Role; salt?: string; pin?: string }
 const K = 'nm_profile';

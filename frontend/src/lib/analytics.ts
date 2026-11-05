@@ -1,7 +1,7 @@
 /* Consent-gated usage analytics. OFF by default. With consent, only counters and day-level activity are kept (never note text),
    and — only if a pilot endpoint is set — are POSTed. The same numbers can be exported as a file for a pilot. */
-import { defaultKV } from './friday/learn';
-import type { KV } from './friday/learn';
+import { defaultKV } from './kv';
+import type { KV } from './kv';
 const DAY = 86400000;
 export interface AnCfg { consent: boolean; endpoint: string; anonId: string; firstSeen: number }
 const K = 'nm_an_cfg', D = 'nm_an_data';

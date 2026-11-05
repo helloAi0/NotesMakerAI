@@ -1,0 +1,39 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request: {}
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults: { run: { working-directory: frontend } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - name: Type-check
+        run: npx tsc -b
+      - name: Lint (no errors allowed)
+        run: npx eslint src server --quiet
+      - name: Unit tests and the 50-question FRIDAY evaluation
+        run: npm run test:unit
+      - name: Build
+        run: npm run build
+      - name: Bundle size budget
+        run: node tools/budget.mjs
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: |
+          npx vite preview --port 5300 --host 127.0.0.1 &
+          sleep 4
+          BASE=http://127.0.0.1:5300 npm run test:e2e
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: node --test test.mjs
+        working-directory: server-api

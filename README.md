@@ -1,5 +1,7 @@
 # Notes Maker AI
 
+[![CI](https://github.com/helloAi0/NotesMakerAI/actions/workflows/ci.yml/badge.svg)](https://github.com/helloAi0/NotesMakerAI/actions/workflows/ci.yml)
+
 Digital notebook with voice (dictation, equation dictation, read-aloud from any sentence), AI notes, a PDF library and a
 Visuals Studio with 100+ interactive STEM simulations (Class 8 to postgraduate) and an honest curriculum-coverage view.
 
