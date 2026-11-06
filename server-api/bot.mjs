@@ -85,7 +85,25 @@ export function serveWhatsApp(wa, port = 8788) {
 }
 /** Gemini audio transcription (optional) */
 export const geminiTranscriber = (key, fetchImpl = fetch) => async ({ bytes, mime }) => { const r = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent', { method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': key }, body: JSON.stringify({ contents: [{ parts: [{ text: 'Transcribe this voice note exactly. Return only the words spoken.' }, { inline_data: { mime_type: mime, data: Buffer.from(bytes).toString('base64') } }] }] }) }); if (!r.ok) throw new Error('transcribe ' + r.status); const j = await r.json(); return String(j?.candidates?.[0]?.content?.parts?.[0]?.text ?? '').trim(); };
+
+// `node bot.mjs --check` verifies every real connection in a minute, without sending any message to anyone.
+export async function doctor(env, fetchImpl = fetch) {
+  const out = []; const add = (name, ok, detail) => out.push({ name, ok, detail });
+  const jget = async (url, init) => { try { const r = await fetchImpl(url, init); return { s: r.status, j: await r.json().catch(() => ({})) }; } catch (e) { return { s: 0, j: {}, err: String(e?.message || e).slice(0, 80) }; } };
+  const api = String(env.NM_API || '').replace(/\/+$/, '');
+  if (!api) add('Notes Maker server', false, 'NM_API is not set.'); else { const r = await jget(api + '/market/config'); add('Notes Maker server', r.s === 200, r.s === 200 ? `reachable (online payments ${r.j.gateway ? 'ON' : 'off'})` : `cannot reach ${api} (${r.err || 'HTTP ' + r.s})`); }
+  if (!env.NM_BOT_KEY || env.NM_BOT_KEY.length < 16) add('Bot key', false, 'NM_BOT_KEY must be at least 16 characters and match the server.');
+  else if (api) { const r = await jget(api + '/bot/push', { method: 'POST', headers: { 'content-type': 'application/json', 'x-bot-key': env.NM_BOT_KEY }, body: JSON.stringify({ chat: 'doctor-check', items: [] }) }); add('Bot key', r.s === 404, r.s === 404 ? 'accepted by the server' : r.s === 401 ? 'REJECTED: the key differs from the server NM_BOT_KEY' : `unexpected answer (HTTP ${r.s})`); }
+  if (env.TELEGRAM_TOKEN) {
+    const me = await jget(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getMe`); add('Telegram token', !!me.j.ok, me.j.ok ? `bot @${me.j.result?.username}` : 'Telegram rejected the token (check it with @BotFather).');
+    if (me.j.ok) { const w = await jget(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getWebhookInfo`); const has = !!w.j.result?.url; add('Telegram polling', !has, has ? 'a webhook is set on this bot, which blocks polling. Remove it with deleteWebhook.' : 'no webhook set (polling will work)'); }
+  } else add('Telegram', true, 'skipped (TELEGRAM_TOKEN not set)');
+  if (env.WA_TOKEN && env.WA_PHONE_ID) { const w = await jget(`https://graph.facebook.com/v20.0/${encodeURIComponent(env.WA_PHONE_ID)}?fields=display_phone_number,verified_name`, { headers: { authorization: 'Bearer ' + env.WA_TOKEN } }); add('WhatsApp number', w.s === 200 && !!w.j.id, w.s === 200 ? `${w.j.display_phone_number || w.j.id}` : 'Meta rejected the token or phone number id.'); if (!env.WA_APP_SECRET || !env.WA_VERIFY_TOKEN) add('WhatsApp webhook secrets', false, 'WA_APP_SECRET and WA_VERIFY_TOKEN are required.'); }
+  else add('WhatsApp', true, 'skipped (WA_TOKEN / WA_PHONE_ID not set)');
+  return out;
+}
 if (import.meta.url === `file://${process.argv[1]}`) {
+  if (process.argv.includes('--check')) { const r = await doctor(process.env); for (const x of r) console.log((x.ok ? 'OK   ' : 'FAIL ') + x.name + ': ' + x.detail); process.exit(r.every(x => x.ok) ? 0 : 1); }
   const { NM_API, NM_BOT_KEY, TELEGRAM_TOKEN, NM_GEMINI_KEY, WA_APP_SECRET, WA_VERIFY_TOKEN, WA_TOKEN, WA_PHONE_ID, WA_PORT } = process.env; const wantWa = WA_APP_SECRET && WA_VERIFY_TOKEN && WA_TOKEN && WA_PHONE_ID;
   if (!NM_API || !NM_BOT_KEY || (!TELEGRAM_TOKEN && !wantWa)) { console.error('Set NM_API, NM_BOT_KEY and TELEGRAM_TOKEN (and/or WA_APP_SECRET, WA_VERIFY_TOKEN, WA_TOKEN, WA_PHONE_ID).'); process.exit(1); }
   const handle = createBridge({ api: NM_API, botKey: NM_BOT_KEY, transcribe: NM_GEMINI_KEY ? geminiTranscriber(NM_GEMINI_KEY) : null });

@@ -7,10 +7,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const MAX_BODY = 2_000_000, TOKEN_TTL = 7 * 24 * 3600 * 1000;
-export function createServer({ dataFile = './data.json', secret = process.env.NM_SECRET || '', allowOrigin = process.env.NM_ORIGIN || '', now = () => Date.now() } = {}) {
+export function createServer({ dataFile = './data.json', secret = process.env.NM_SECRET || '', allowOrigin = process.env.NM_ORIGIN || '', now = () => Date.now(), gateway = {} } = {}) {
+  const gw = { keyId: process.env.RZP_KEY_ID || '', keySecret: process.env.RZP_KEY_SECRET || '', webhookSecret: process.env.RZP_WEBHOOK_SECRET || '', fetchImpl: globalThis.fetch, feePct: Number(process.env.NM_FEE_PCT ?? 10), ...gateway };
+  const gwOn = () => !!(gw.keyId && gw.keySecret && gw.webhookSecret);
   if (!secret || secret.length < 16) throw new Error('Set NM_SECRET to a random string of at least 16 characters.');
   if (!(process.env.NM_BOT_KEY || '').length) console.warn('NM_BOT_KEY is not set: the Telegram/WhatsApp bot routes are disabled.');
-  let db = { users: {}, classes: {}, reports: {}, blobs: {}, listings: {}, purchases: {}, inbox: {}, links: {}, chats: {} };
+  let db = { users: {}, classes: {}, reports: {}, blobs: {}, listings: {}, purchases: {}, payments: {}, inbox: {}, links: {}, chats: {} };
   try { db = { ...db, ...JSON.parse(fs.readFileSync(dataFile, 'utf8')) }; } catch { /* new database */ }
   const save = () => { fs.mkdirSync(path.dirname(path.resolve(dataFile)), { recursive: true }); const tmp = dataFile + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(db)); fs.renameSync(tmp, dataFile); };
   const hits = new Map(); const limited = (key, max, ms) => { const t = now(); const a = (hits.get(key) ?? []).filter(x => t - x < ms); a.push(t); hits.set(key, a); return a.length > max; };
@@ -50,12 +52,37 @@ export function createServer({ dataFile = './data.json', secret = process.env.NM
       const upi = clean(b.upi, 80); if (price > 0 && !/^[a-zA-Z0-9.\-_]{2,64}@[a-zA-Z]{2,32}$/.test(upi)) return [400, { error: 'Enter a valid UPI ID like name@bank to receive payments.' }];
       const id = crypto.randomBytes(5).toString('hex'); db.listings[id] = { id, title, subject: clean(b.subject, 40) || 'General', board: clean(b.board, 20), lang: clean(b.lang, 6) || 'en', price, upi: price ? upi : '', author: u.email, authorName: u.name, preview: body.slice(0, 400), body, created: now(), hidden: false, reports: [] }; save(); return [201, { listing: lpub(db.listings[id]) }];
     },
-    'GET /market/listing': (_b, u, _ip, q) => { const l = db.listings[clean(q.get('id'), 20)]; if (!l || l.hidden) return [404, { error: 'Not found.' }]; if (l.price === 0 || l.author === u.email || hasPaid(l.id, u.email)) return [200, { listing: { ...lpub(l), body: l.body }, unlocked: true }]; const mine = Object.values(db.purchases).filter(p => p.listing === l.id && p.buyer === u.email).sort((a, b) => b.created - a.created)[0]; return [200, { listing: lpub(l), unlocked: false, purchase: mine ? { status: mine.status, utr: mine.utr } : null, pay: { upi: l.upi, amount: l.price, note: 'Pay in your UPI app, then send the 12-digit UTR. The creator confirms and the notes unlock.' } }]; },
+    'GET /market/listing': (_b, u, _ip, q) => { const l = db.listings[clean(q.get('id'), 20)]; if (!l || l.hidden) return [404, { error: 'Not found.' }]; if (l.price === 0 || l.author === u.email || hasPaid(l.id, u.email)) return [200, { listing: { ...lpub(l), body: l.body }, unlocked: true }]; const mine = Object.values(db.purchases).filter(p => p.listing === l.id && p.buyer === u.email).sort((a, b) => b.created - a.created)[0]; return [200, { listing: lpub(l), unlocked: false, purchase: mine ? { status: mine.status, utr: mine.utr } : null, pay: { gateway: gwOn(), upi: gwOn() ? '' : l.upi, amount: l.price, note: 'Pay in your UPI app, then send the 12-digit UTR. The creator confirms and the notes unlock.' } }]; },
     'POST /market/purchase': (b, u) => {
-      const l = db.listings[clean(b.id, 20)]; if (!l || l.hidden || l.price === 0) return [404, { error: 'Not a paid listing.' }]; if (l.author === u.email) return [400, { error: 'These are your own notes.' }]; const utr = String(b.utr ?? '').trim(); if (!/^\d{12}$/.test(utr)) return [400, { error: 'A UPI reference (UTR) is 12 digits.' }];
+      const l = db.listings[clean(b.id, 20)]; if (!l || l.hidden || l.price === 0) return [404, { error: 'Not a paid listing.' }]; if (l.author === u.email) return [400, { error: 'These are your own notes.' }]; if (gwOn()) return [400, { error: 'This server takes online payments only. Use Pay securely.' }]; const utr = String(b.utr ?? '').trim(); if (!/^\d{12}$/.test(utr)) return [400, { error: 'A UPI reference (UTR) is 12 digits.' }];
       if (Object.values(db.purchases).some(p => p.utr === utr)) return [409, { error: 'That UTR was already used.' }]; if (hasPaid(l.id, u.email) || Object.values(db.purchases).some(p => p.listing === l.id && p.buyer === u.email && p.status === 'pending')) return [409, { error: 'You already have a purchase for this.' }];
       const id = crypto.randomBytes(5).toString('hex'); db.purchases[id] = { id, listing: l.id, buyer: u.email, buyerName: u.name, utr, amount: l.price, status: 'pending', created: now() }; save(); return [201, { purchase: db.purchases[id], message: 'Sent to the creator for confirmation.' }]; },
-    'POST /market/confirm': (b, u) => { const p = db.purchases[clean(b.purchase, 20)]; const l = p && db.listings[p.listing]; if (!p || l.author !== u.email) return [403, { error: 'Not your sale.' }]; p.status = b.accept === false ? 'rejected' : 'confirmed'; p.decided = now(); save(); return [200, { purchase: p }]; },
+    /* ---------- Razorpay gateway mode (optional). Money goes to YOUR Razorpay account; unlocks happen only after a signed webhook. ---------- */
+    'GET /market/config': () => [200, { gateway: gwOn(), feePct: gwOn() ? gw.feePct : 0 }],
+    'POST /market/checkout': async (b, u) => {
+      if (!gwOn()) return [501, { error: 'Online payments are not enabled on this server. Use the UPI option.' }];
+      const l = db.listings[clean(b.id, 20)]; if (!l || l.hidden || l.price === 0) return [404, { error: 'Not a paid listing.' }]; if (l.author === u.email) return [400, { error: 'These are your own notes.' }]; if (hasPaid(l.id, u.email)) return [409, { error: 'You already own this.' }];
+      if (limited('checkout:' + u.email, 10, 3_600_000)) return [429, { error: 'Too many attempts. Try later.' }];
+      const id = crypto.randomBytes(5).toString('hex');
+      let r; try { r = await gw.fetchImpl('https://api.razorpay.com/v1/payment_links', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Basic ' + Buffer.from(gw.keyId + ':' + gw.keySecret).toString('base64') }, body: JSON.stringify({ amount: l.price * 100, currency: 'INR', description: l.title.slice(0, 100), reference_id: id, notes: { purchase: id }, customer: { email: u.email } }) }); } catch { return [502, { error: 'Could not reach the payment provider. Try again.' }]; }
+      const j = await r.json().catch(() => ({})); if (!r.ok || !j.short_url) return [502, { error: 'The payment provider refused the request.' }];
+      db.purchases[id] = { id, listing: l.id, buyer: u.email, buyerName: u.name, utr: '', amount: l.price, status: 'pending', via: 'razorpay', linkId: String(j.id || ''), created: now() }; save();
+      return [201, { purchase: id, url: j.short_url }];
+    },
+    'POST /webhooks/razorpay': (b, _u, _ip, _q, h, raw) => {
+      if (!gwOn()) return [501, { error: 'Not enabled.' }];
+      const sig = String(h['x-razorpay-signature'] || ''), ok = crypto.createHmac('sha256', gw.webhookSecret).update(raw).digest('hex');
+      if (sig.length !== ok.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(ok))) return [400, { error: 'Bad signature.' }];
+      if (b.event !== 'payment_link.paid') return [200, { ignored: true }];
+      const pl = b.payload?.payment_link?.entity, pay = b.payload?.payment?.entity; const pid = String(pay?.id || ''); const p = db.purchases[String(pl?.reference_id || '')];
+      if (!pid || !p || p.via !== 'razorpay') return [200, { ignored: true }];
+      if (db.payments[pid]) return [200, { duplicate: true }];
+      if (Number(pay.amount) !== p.amount * 100 || pay.currency !== 'INR' || (pl.id && p.linkId && pl.id !== p.linkId)) { p.status = 'rejected'; p.reason = 'amount mismatch'; db.payments[pid] = { purchase: p.id, ok: false }; save(); return [200, { rejected: true }]; }
+      const fee = Math.round(p.amount * gw.feePct) / 100; p.status = 'confirmed'; p.decided = now(); p.paymentId = pid; p.fee = fee; p.creatorShare = p.amount - fee; db.payments[pid] = { purchase: p.id, ok: true, amount: p.amount, fee, at: now() }; save();
+      return [200, { ok: true }];
+    },
+    'GET /market/earnings': (_b, u) => { const rows = Object.values(db.purchases).filter(p => p.via === 'razorpay' && p.status === 'confirmed' && db.listings[p.listing]?.author === u.email); return [200, { sales: rows.length, gross: rows.reduce((a, p) => a + p.amount, 0), owed: rows.reduce((a, p) => a + (p.creatorShare ?? 0), 0), note: 'Online payments land in the platform Razorpay account. Payouts to creators are made by the platform operator (manually, or via Razorpay Route after KYC).' }]; },
+    'POST /market/confirm': (b, u) => { const p = db.purchases[clean(b.purchase, 20)]; const l = p && db.listings[p.listing]; if (!p || l.author !== u.email) return [403, { error: 'Not your sale.' }]; if (p.via === 'razorpay') return [400, { error: 'Online payments confirm automatically.' }]; p.status = b.accept === false ? 'rejected' : 'confirmed'; p.decided = now(); save(); return [200, { purchase: p }]; },
     'GET /market/mine': (_b, u) => { const mine = Object.values(db.listings).filter(l => l.author === u.email); const ids = new Set(mine.map(l => l.id)); return [200, { listings: mine.map(l => ({ ...lpub(l), sales: confirmedSales(l.id) })), incoming: Object.values(db.purchases).filter(p => ids.has(p.listing)), bought: Object.values(db.purchases).filter(p => p.buyer === u.email).map(p => ({ ...p, title: db.listings[p.listing]?.title })) }]; },
     'POST /market/report': (b, u) => { const l = db.listings[clean(b.id, 20)]; if (!l) return [404, { error: 'Not found.' }]; const age = Number(process.env.NM_REPORT_AGE_MS ?? 86_400_000); if (now() - (db.users[u.email]?.created ?? 0) < age) return [403, { error: 'Accounts under 24 hours old cannot report listings yet.' }]; if (limited('report:' + u.email, 10, 3_600_000)) return [429, { error: 'Too many reports this hour.' }]; if (l.author === u.email) return [400, { error: 'These are your own notes (use Unlist).' }]; if (!l.reports.includes(u.email)) l.reports.push(u.email); if (l.reports.length >= 3) l.hidden = true; save(); return [200, { ok: true, hidden: l.hidden }]; },
     'POST /market/unlist': (b, u) => { const l = db.listings[clean(b.id, 20)]; if (!l || l.author !== u.email) return [403, { error: 'Not yours.' }]; l.hidden = true; save(); return [200, { ok: true }]; },
@@ -73,14 +100,14 @@ export function createServer({ dataFile = './data.json', secret = process.env.NM
   const confirmedSales = id => Object.values(db.purchases).filter(p => p.listing === id && p.status === 'confirmed').length;
   const botOk = h => { const k = process.env.NM_BOT_KEY || ''; const got = String(h['x-bot-key'] || ''); return k.length >= 16 && got.length === k.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(k)); };
   const pub = u => ({ email: u.email, name: u.name, role: u.role });
-  const PUBLIC = new Set(['POST /register', 'POST /login', 'GET /market/listings', 'POST /bot/claim', 'POST /bot/push']);
+  const PUBLIC = new Set(['POST /register', 'POST /login', 'GET /market/listings', 'POST /bot/claim', 'POST /bot/push', 'POST /webhooks/razorpay', 'GET /market/config']);
   const server = http.createServer(async (req, res) => {
     const origin = req.headers.origin; const send = (code, obj) => { const h = { 'content-type': 'application/json', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' }; if (allowOrigin && origin === allowOrigin) { h['access-control-allow-origin'] = origin; h['vary'] = 'origin'; h['access-control-allow-headers'] = 'authorization,content-type'; h['access-control-allow-methods'] = 'GET,POST,PUT,DELETE'; } res.writeHead(code, h); res.end(JSON.stringify(obj)); };
     try {
       if (req.method === 'OPTIONS') return send(204, {}); const url = new URL(req.url, 'http://x'); const key = `${req.method} ${url.pathname}`; const fn = routes[key]; if (!fn) return send(404, { error: 'Not found.' });
-      let body = {}; if (req.method === 'POST' || req.method === 'PUT') { const chunks = []; let n = 0; for await (const c of req) { n += c.length; if (n > MAX_BODY) { const sock = req.socket; res.on('finish', () => sock && sock.destroy()); res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }); return res.end(JSON.stringify({ error: 'Request too large.' })); } chunks.push(c); } try { body = JSON.parse(Buffer.concat(chunks).toString() || '{}'); } catch { return send(400, { error: 'Invalid JSON.' }); } }
+      let body = {}, raw = ''; if (req.method === 'POST' || req.method === 'PUT') { const chunks = []; let n = 0; for await (const c of req) { n += c.length; if (n > MAX_BODY) { const sock = req.socket; res.on('finish', () => sock && sock.destroy()); res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }); return res.end(JSON.stringify({ error: 'Request too large.' })); } chunks.push(c); } raw = Buffer.concat(chunks).toString(); try { body = JSON.parse(raw || '{}'); } catch { return send(400, { error: 'Invalid JSON.' }); } }
       let user = null; if (!PUBLIC.has(key)) { const p = verify((req.headers.authorization || '').replace(/^Bearer\s+/i, '')); user = p && db.users[p.sub]; if (!user) return send(401, { error: 'Sign in first.' }); }
-      const [code, out] = fn(body, user, req.socket.remoteAddress || 'x', url.searchParams, req.headers); send(code, out);
+      const [code, out] = await fn(body, user, req.socket.remoteAddress || 'x', url.searchParams, req.headers, raw); send(code, out);
     } catch (e) { send(500, { error: 'Server error.' }); console.error(e); }
   });
   return server;

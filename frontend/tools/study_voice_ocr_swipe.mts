@@ -60,4 +60,8 @@ for (const raw of ['', 'null', '[]', '{"equations": "x"}', '{"equations":[null, 
 assert.equal(parseScan('{"nodes":[{"id":"a","label":"' + 'x'.repeat(500) + '"}]}').nodes[0].label.length, 60); assert.equal(parseScan('{"equations":[{"latex":"\\\\undefinedmacro{x}"}]}').equations[0].valid, false);
 assert.equal(layoutGraph([], []).nodes.length, 0);
 const d2 = testDeck(); d2.add([{ id: 'u1', topic: 'T', front: 'q', back: 'a', kind: 'qa' as const, created: t0, due: t0, S: 0, D: 0, reps: 0, lapses: 0, state: 'new' as const }]); const before = peek(d2, 'u1')!; swipe(d2, 'u1', 'left', t0 + 1000); assert.notEqual(d2.cards()[0].due, before.due); assert.equal(restore(d2, before), true); assert.deepEqual(d2.cards()[0], before, 'undo restores the exact card'); assert.equal(queue(d2, 'T', t0 + 2000).length, 1, 'and it is due again'); assert.equal(restore(d2, { ...before, id: 'nope' }), false);
+
+{ const cmd = (x: string) => parseInterrupt(x).intent;
+  for (const [x, want] of [['थांबा', 'pause'], ['पुढे', 'next'], ['मागे जा', 'back'], ['हळू', 'slower'], ['थांब, पुन्हा समजावून सांग', 'explain'], ['সহজ করে বুঝিয়ে বলো', 'simpler'], ['পরের', 'next'], ['আবার বলো', 'explain'], ['நிறுத்து', 'stop'], ['அடுத்து', 'next'], ['மீண்டும் விளக்குங்கள்', 'explain'], ['எளிமையாக', 'simpler'], ['ఆగండి', 'pause'], ['తరువాత', 'next'], ['మళ్ళీ వివరించు', 'explain'], ['ఉదాహరణ', 'example'], ['namaste kuch bhi', 'none']] as [string, string][]) assert.equal(cmd(x), want, x);
+  assert.equal(cmd('நிறுத்து'), 'stop'); }
 console.log('voice + ocr + swipe OK');

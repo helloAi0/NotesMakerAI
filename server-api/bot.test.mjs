@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict'; import crypto from 'node:crypto'; import fs from 'node:fs';
-import { parseDue, parseMessage, createBridge, telegram, whatsapp, serveWhatsApp } from './bot.mjs'; import { createServer } from './server.mjs';
+import { doctor, parseDue, parseMessage, createBridge, telegram, whatsapp, serveWhatsApp } from './bot.mjs'; import { createServer } from './server.mjs';
 const NOW = new Date(2026, 10, 5, 10); // Thu 5 Nov 2026
 test('due dates', () => {
   assert.deepEqual(parseDue('revise ROS 2 commands tomorrow', NOW), { due: '2026-11-06', rest: 'revise ROS 2 commands' }); assert.equal(parseDue('submit lab on friday', NOW).due, '2026-11-06'); assert.equal(parseDue('exam on monday', NOW).due, '2026-11-09'); assert.equal(parseDue('read ch 3 in 3 days', NOW).due, '2026-11-08'); assert.equal(parseDue('viva on 12 nov', NOW).due, '2026-11-12'); assert.equal(parseDue('thing on 2 nov', NOW).due, '2027-11-02', 'past dates roll to next year'); assert.equal(parseDue('call mom today', NOW).due, '2026-11-05'); assert.equal(parseDue('just a note', NOW).due, ''); assert.equal(parseDue('plan day after tomorrow', NOW).due, '2026-11-07');
@@ -36,4 +36,12 @@ test('end to end with the real server and a fake Telegram / WhatsApp', async () 
       assert.equal((await fetch(hu, { method: 'POST', body: 'not json', headers: { 'x-hub-signature-256': 'sha256=' + crypto.createHmac('sha256', 'sec').update('not json').digest('hex') } })).status, 400); } finally { hook.close(); }
     assert.equal(parseDue('exam on thursday', NOW).due, '2026-11-12', 'same weekday means next week'); assert.equal(parseDue('exam on Friday evening', NOW).due, '2026-11-06');
   } finally { srv.close(); fs.rmSync(file, { force: true }); }
+});
+
+test('doctor: finds good and bad setups without sending messages', async () => {
+  const calls = []; const mk = (map) => async (url, init) => { calls.push(url); for (const [k, v] of Object.entries(map)) if (url.includes(k)) { if (v instanceof Error) throw v; return { status: v[0], json: async () => v[1] }; } return { status: 404, json: async () => ({}) }; };
+  const good = await doctor({ NM_API: 'http://x', NM_BOT_KEY: 'k'.repeat(16), TELEGRAM_TOKEN: 't', WA_TOKEN: 'w', WA_PHONE_ID: '1', WA_APP_SECRET: 's', WA_VERIFY_TOKEN: 'v' }, mk({ '/market/config': [200, { gateway: false }], '/bot/push': [404, {}], getMe: [200, { ok: true, result: { username: 'nm_bot' } }], getWebhookInfo: [200, { ok: true, result: { url: '' } }], graph: [200, { id: '1', display_phone_number: '+91 99' }] }));
+  assert.ok(good.every(x => x.ok), JSON.stringify(good)); assert.ok(!calls.some(u => /sendMessage|\/messages/.test(u)), 'never sends a message');
+  const bad = await doctor({ NM_API: 'http://x', NM_BOT_KEY: 'k'.repeat(16), TELEGRAM_TOKEN: 't' }, mk({ '/market/config': new Error('ECONNREFUSED'), '/bot/push': [401, {}], getMe: [401, { ok: false }] }));
+  assert.equal(bad.filter(x => !x.ok).length, 3); assert.ok((await doctor({ NM_API: 'http://x', NM_BOT_KEY: 'k'.repeat(16), TELEGRAM_TOKEN: 't' }, mk({ '/market/config': [200, {}], '/bot/push': [404, {}], getMe: [200, { ok: true, result: {} }], getWebhookInfo: [200, { result: { url: 'https://h' } }] }))).some(x => x.name === 'Telegram polling' && !x.ok), 'webhook blocks polling');
 });

@@ -11,6 +11,7 @@ import { SCAN_PROMPT, parseScan, layoutGraph, checkLatex, toMarkdown, toLatexDoc
 import type { Scan } from '../../lib/study/mathocr';
 import { Narrator, cleanForSpeech } from '../../lib/study/interrupt';
 import { splitSentences } from '../../lib/lecture';
+import { getUiLang } from '../../lib/i18n';
 import { useDictation } from '../../lib/useVoice';
 import { parseJsonLoose } from '../../lib/aiClient';
 const MarkdownView = lazy(() => import('../MarkdownView'));
@@ -35,7 +36,7 @@ function useSpeaker() {
 
 /* ---------------- 1. Bhasha ---------------- */
 export function Bhasha({ material, setMaterial, onResult, res, setRes }: { material: string; setMaterial: (s: string) => void; onResult: (t: string) => void; res: FlipResult | null; setRes: (r: FlipResult | null) => void }) {
-  const ai = useAI(); const sp = useSpeaker(); const [lang, setLang] = useState(res?.lang ?? 'hi'); const [mode, setMode] = useState<'notes' | 'translate'>('notes'); const [uiLang, setUiLang] = useState('en'); const abort = useRef<AbortController | null>(null);
+  const ai = useAI(); const sp = useSpeaker(); const [lang, setLang] = useState(res?.lang ?? 'hi'); const [mode, setMode] = useState<'notes' | 'translate'>('notes'); const [uiLang, setUiLang] = useState<string>(() => getUiLang()); const abort = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(''); const [err, setErr] = useState('');
   const run = async () => { setErr(''); setRes(null); if (!material.trim()) { setErr('Add some material first.'); return; } if (!ai.ready()) { setErr('Add an AI key or a local model in Settings first.'); return; } setBusy(ui(uiLang, 'working')); const ac = new AbortController(); abort.current = ac; try { const r = await flip(material, lang, ai.gen, { mode, signal: ac.signal, onProgress: (d, t) => setBusy(`${ui(uiLang, 'working')} ${d}/${t}`) }); if (r.failed >= r.chunks) setErr('The AI could not be reached, so nothing was translated. Check your key and internet, then try again.'); else { setRes(r); onResult(r.text); } } catch (e) { setErr((e as Error).message); } abort.current = null; setBusy(''); };
   const l = INDIAN.find(x => x.code === lang)!;
@@ -126,8 +127,8 @@ export function VoiceTutor({ material, setMaterial }: { material: string; setMat
         <button className={dark} onClick={start} data-testid="vt-start">Start lesson</button><button className={btn} onClick={() => n?.pause()} disabled={n?.state !== 'speaking'} data-testid="vt-pause">Pause</button><button className={btn} onClick={() => n?.resume()} disabled={n?.state !== 'paused'} data-testid="vt-resume">Continue</button><button className={btn} onClick={() => n?.stop()}>Stop</button></div></div>
       {n && <div className={box} data-testid="vt-now"><div className="text-xs text-slate-500">Reading — {n.state}{n.rewrites ? ` · ${n.rewrites} part(s) re-explained for you` : ''}</div>
         <div className="max-h-48 overflow-auto text-sm leading-relaxed">{n.sentences.map((s, i) => <span key={i} className={i === n.i ? 'bg-amber-200 rounded px-0.5' : ''}>{s} </span>)}</div></div>}
-      <div className={box}><b>Interrupt</b><div className="text-xs text-slate-600">Press the mic and say, for example: “Wait, explain that enthalpy part again with an easier example.” Or type it. Also understood: pause, continue, next, go back, slower, faster, stop. A few Hindi words work too (ruko, dobara samjhao, aasan, udaharan, dheere, aage, band karo). Other Indian languages: say or type the request in English.</div>
-        <div className="flex gap-2 flex-wrap items-center"><button className={listening ? 'px-3 py-1.5 rounded bg-red-600 text-white text-sm' : dark} onClick={() => { if (listening) dict.stop(); else { nref.current?.pause(); dict.start(); } }} data-testid="vt-mic">{listening ? 'Listening… tap to stop' : '🎤 Interrupt'}</button>
+      <div className={box}><b>Interrupt</b><div className="text-xs text-slate-600">Press the mic and say, for example: “Wait, explain that enthalpy part again with an easier example.” Or type it. Also understood: pause, continue, next, go back, slower, faster, stop. Commands also work in Hindi, Marathi, Bengali, Tamil and Telugu (native script or Roman letters), for example ruko, dobara samjhao, aasan, udaharan, dheere. The mic listens in the language selected above. These word lists are a first draft, so if something is not understood, say it in English.</div>
+        <div className="flex gap-2 flex-wrap items-center"><button className={listening ? 'px-3 py-1.5 rounded bg-red-600 text-white text-sm' : dark} onClick={() => { if (listening) dict.stop(); else { nref.current?.pause(); dict.setLang(bcp); dict.start(); } }} data-testid="vt-mic">{listening ? 'Listening… tap to stop' : '🎤 Interrupt'}</button>
           <input value={typed} onChange={e => setTyped(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && typed.trim()) { void interrupt(typed); setTyped(''); } }} placeholder="or type: explain entropy again with an example" className="border rounded px-2 py-1 text-sm flex-1 min-w-48" aria-label="Type an interruption" data-testid="vt-typed" /><button className={btn} onClick={() => { if (typed.trim()) { void interrupt(typed); setTyped(''); } }} data-testid="vt-send">Send</button></div>
         {heard && <div className="text-xs">Heard: “{heard}”</div>}{dict.error && <Msg m={dict.error} bad />}<Msg m={msg} /></div>
     </div>

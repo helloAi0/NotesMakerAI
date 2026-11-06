@@ -42,4 +42,14 @@ t = trace('class A:\n    def __init__(self, n):\n        self.n = n\n    def inc
 assert.ok(trace('x = f"{1 +}"').error, 'bad f-string expression is an error, not a crash'); assert.ok(trace('x = f"{abc"').error); assert.ok(trace('print(f"{3:q}")').error);
 assert.ok(trace('x = (1,\n  2').error, 'unclosed bracket'); assert.ok(trace('if True:\nx = 1').error, 'missing indent'); assert.ok(trace('x = "abc').error); assert.ok(trace('def f():\n  return 1\n    y = 2').error);
 assert.equal(trace('').steps.length, 2); assert.equal(trace('\n\n   \n').error, undefined);
+
+import { describeError } from '../src/lib/study/pytrace';
+{ const o = (c: string) => { const t = trace(c); assert.equal(t.error, undefined, c + ' -> ' + JSON.stringify(t.error)); return t.output; };
+assert.equal(o('print(5.0, 10/2, 1e-5)'), '5.0 5.0 1e-05\n'); assert.equal(o('print(2**100)'), '1267650600228229401496703205376\n'); assert.equal(o('print(9007199254740993+1)'), '9007199254740994\n');
+assert.equal(o('import math\nprint(math.factorial(25))'), '15511210043330985984000000\n'); assert.equal(o('s={1,2}\ns.add(2)\nprint(s|{5})'), '{1, 2, 5}\n');
+assert.equal(o('try:\n  1/0\nexcept ZeroDivisionError as e:\n  print("c",e)\nfinally:\n  print("f")'), 'c division by zero\nf\n');
+assert.equal(o('class A(Exception): pass\ntry:\n  raise A("hi")\nexcept Exception as e:\n  print(e)'), 'hi\n');
+assert.equal(o('import heapq\nh=[]\nheapq.heappush(h,3)\nheapq.heappush(h,1)\nprint(heapq.heappop(h))'), '1\n');
+assert.equal(o('a=[1,2,3,4,5]\nprint(a[::2], {x%2 for x in range(5)})'), '[1, 3, 5] {0, 1}\n');
+const e = trace('a=[1]\nprint(a[5])'); assert.equal(describeError(e.error!), 'IndexError: list index out of range'); assert.ok(trace('with open("x") as f:\n  pass').error, 'with unsupported, clear error'); }
 console.log('pytrace OK');

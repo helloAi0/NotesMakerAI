@@ -93,6 +93,14 @@ Open **Study Studio** in the sidebar.
 
 Tests: `npm run test:unit`, `npm run test:e2e` (includes `e2e_studio.mjs`, which runs the real server), `npm run test:server`.
 
+### Second round (code visualizer, payments, languages)
+- **Code visualizer** rewritten: exact big integers, Python-style floats (`5.0`), sets, try/except/finally/raise/assert, custom exceptions with inheritance and `super()`, imports of `math`, `random` (seeded, deterministic), `collections`, `heapq`, `sys`, slices with steps, set/dict comprehensions. Still unsupported (clear error): `with`, `yield`, decorators, `*args/**kwargs`.
+- **Payments:** optional Razorpay mode (see `server-api/README.md`). Verified only against a fake gateway.
+- **Bot:** `node bot.mjs --check` health check. Real Telegram/WhatsApp delivery is still untested here.
+- **App language:** header dropdown (English, Hindi, Marathi, Bengali, Tamil, Telugu) translates the menu, header, start banner and Study Studio headings. Lessons, simulations and most tool panels stay English. Translations are drafts without native-speaker review.
+- **Voice interruptions** understand Hindi, Marathi, Bengali, Tamil and Telugu command words (draft lists, not reviewed by native speakers) and the mic listens in the language chosen in the Voice tab.
+- `tools/e2e_sweep.mjs` visits every view, Studio tab and language at desktop and phone width and fails on any console error, failed request or overflow.
+
 ### Audit notes (what was found and fixed after the first release of Study Studio)
 - **Bhasha:** model output with Indic digits in term markers (⟦१⟧) was not restored; place and person names were frozen in English; whitespace around protected terms was lost; huge PDFs were sent in full (now capped at 30,000 characters with a visible notice); added Stop; scanned PDFs get an explanation; speech reads sentence by sentence (long text cut off before) and stops when you leave the tab.
 - **Exam engines:** unusable AI replies now show an error instead of an empty list.

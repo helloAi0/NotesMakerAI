@@ -5,10 +5,24 @@ export type Gen = (prompt: string) => Promise<string>;
 export type Intent = 'stop' | 'pause' | 'resume' | 'repeat' | 'explain' | 'simpler' | 'example' | 'slower' | 'faster' | 'next' | 'back' | 'none';
 export interface Parsed { intent: Intent; wait: boolean; focus: string; flags: { simpler: boolean; example: boolean; deeper: boolean; shorter: boolean; analogy: boolean } }
 const LEAD = /^(?:(?:hey|ok|okay|friday|um|uh|so)[,\s]+)*(?:wait|hold on|stop|one sec(?:ond)?|just a (?:sec|minute)|excuse me|sorry)?[,.\s-]*/i;
-/** a few Hindi / Hinglish phrases (Devanagari or Roman) are mapped to the English commands below. Other Indian languages: type or say English. */
+/** a few Hindi / Hinglish phrases (Devanagari or Roman) are mapped to the English commands below. Marathi, Bengali, Tamil, Telugu: see INDIC below. */
 const HI: [RegExp, string][] = [[/आगे बढ़ो|aage badho|जारी रखो|chalu rakho/g, ' continue '], [/रुको|रुकिए|ruko|rukiye|ek minute/g, ' wait '], [/बंद करो|band karo|चुप हो जाओ|chup/g, ' stop '], [/पीछे जाओ|peeche|पिछला/g, ' go back '], [/आगे|aage|अगला|agla/g, ' next '], [/दोबारा|dobara|फिर से|phir se|firse|दुबारा/g, ' again '], [/समझाओ|समझाइए|samjhao|samjhaiye|बताओ|batao/g, ' explain '], [/आसान|aasan|asan|सरल|saral/g, ' easier '], [/उदाहरण|udaharan/g, ' example '], [/धीरे|dheere|dhire/g, ' speak slower '], [/तेज़|तेज|tez|jaldi/g, ' speed up ']];
+/** Marathi, Bengali, Tamil and Telugu command words (native script and common romanisation). DRAFT word lists: they have not been reviewed by native speakers. Unknown phrasing falls back to "no command". */
+const INDIC: [RegExp, string][] = [
+  [/पुढे चालू ठेवा|pudhe chalu|চালিয়ে যাও|chaliye jao|தொடருங்கள்|தொடர்|thodarungal|కొనసాగించు|konasaginchu/g, ' continue '],
+  [/मागे जा|मागे|ager dike|আগের|পিছনে|பின்னால்|pinnaal|వెనక్కి|venakki|mage ja/g, ' go back '],
+  [/थांबा|थांब|thamba|দাঁড়াও|থামো|darao|thamo|நில்லுங்கள்|நில்|கொஞ்சம் பொறுங்கள்|nillunga|ఆగండి|ఆగు|agandi/g, ' wait '],
+  [/बंद करा|बंद कर|band kara|বন্ধ করো|bondho koro|নিরব|நிறுத்து|niruthu|ఆపు|aapu/g, ' stop '],
+  [/पुढे|pudhe|পরের|porer|அடுத்து|adutthu|aduthu|తరువాత|taruvata/g, ' next '],
+  [/पुन्हा|परत सांग|punha|আবার|abar|மீண்டும்|meendum|మళ్ళీ|malli/g, ' again '],
+  [/समजावून सांग|समजवा|samjavun sang|বুঝিয়ে বলো|bujhiye bolo|விளக்குங்கள்|விளக்கு|vilakku|వివరించు|vivarinchu|చెప్పండి/g, ' explain '],
+  [/सोपे|सोप्या|sope|সহজ|sohoj|எளிமையாக|எளிதாக|elimaiyaga|సులభంగా|sulabhanga/g, ' easier '],
+  [/उदाहरण|udaharan|উদাহরণ|udahoron|உதாரணம்|udhaaranam|ఉదాహరణ|udaharana/g, ' example '],
+  [/हळू|halu|ধীরে|dhire|மெதுவாக|methuvaga|నెమ్మదిగా|nemmadiga/g, ' speak slower '],
+  [/वेगाने|vegane|দ্রুত|druto|வேகமாக|vegamaga|వేగంగా|veganga/g, ' speed up '],
+];
 export function parseInterrupt(raw: string): Parsed {
-  const t = HI.reduce((x, [re, to]) => x.replace(re, to), raw.toLowerCase()).replace(/\s+/g, ' ').trim().replace(/[“”"']/g, '').replace(/[“”"']/g, '').replace(/\bdo not\b/g, 'dont').replace(/\bdid not\b/g, 'didnt').trim(); const wait = /^(?:\w+[,\s]+)?(wait|hold on|stop|one sec|just a (sec|min)|excuse me)\b/.test(t);
+  const t = [...HI, ...INDIC].reduce((x, [re, to]) => x.replace(re, to), raw.toLowerCase()).replace(/\s+/g, ' ').trim().replace(/[“”"']/g, '').replace(/[“”"']/g, '').replace(/\bdo not\b/g, 'dont').replace(/\bdid not\b/g, 'didnt').trim(); const wait = /^(?:\w+[,\s]+)?(wait|hold on|stop|one sec|just a (sec|min)|excuse me)\b/.test(t);
   const flags = { simpler: /\b(easier|simpler|simply|simple|basic|plain|layman|beginner|eli5|dumb it down|easy)\b/.test(t), example: /\b(example|instance|illustrat|real[- ]life|everyday)\b/.test(t), analogy: /\banalog(y|ies)\b/.test(t), deeper: /\b(in detail|deeper|more detail|elaborate|more about|expand)\b/.test(t), shorter: /\b(shorter|brief|quick(ly)?|summar|in short|tl;?dr)\b/.test(t) };
   const body = t.replace(LEAD, '').trim(); const none: Parsed = { intent: 'none', wait, focus: '', flags };
   if (!t) return none;
