@@ -20,7 +20,7 @@ export function checkLatex(tex: string): { valid: boolean; error?: string } { tr
 
 export function parseScan(raw: string): Scan {
   const w: string[] = []; let j: Record<string, unknown> = {};
-  const m = raw.match(/\{[\s\S]*\}/); try { j = JSON.parse(m ? m[0] : raw); } catch { w.push('The model reply was not readable as data.'); }
+  const m = raw.match(/\{[\s\S]*\}/); try { const x = JSON.parse(m ? m[0] : raw); if (x && typeof x === 'object' && !Array.isArray(x)) j = x; else w.push('The model reply was not readable as data.'); } catch { w.push('The model reply was not readable as data.'); }
   const eqs = (Array.isArray(j.equations) ? j.equations : []).map(e => (typeof e === 'string' ? { latex: e, unsure: false } : e as { latex?: string; unsure?: boolean })).filter(e => e && typeof e.latex === 'string' && e.latex.trim()).slice(0, 40)
     .map(e => { const latex = cleanLatex(e.latex!); const c = checkLatex(latex); return { latex, valid: c.valid, error: c.error, unsure: !!e.unsure }; });
   const nodes: DNode[] = (Array.isArray(j.nodes) ? j.nodes : []).filter((n): n is DNode => !!n && typeof (n as DNode).id !== 'undefined' && typeof (n as DNode).label === 'string').slice(0, 60).map(n => ({ id: String(n.id), label: n.label.slice(0, 60), shape: n.shape }));

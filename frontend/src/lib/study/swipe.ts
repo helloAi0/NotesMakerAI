@@ -13,3 +13,7 @@ export function swipe(deck: Deck, id: string, dir: Dir, now = Date.now()): Card 
 }
 export function queue(deck: Deck, topic: string | null, now = Date.now(), limit = 30): Card[] { return deck.due(now, 500).filter(c => !topic || c.topic === topic).slice(0, limit); }
 export const summary = (log: Dir[]) => { const r = log.filter(d => d !== 'left').length; return { n: log.length, remembered: r, forgot: log.length - r, pct: log.length ? Math.round((r / log.length) * 100) : 0 }; };
+
+/** copy of a card before it is swiped, so a slip of the thumb can be undone */
+export const peek = (deck: Deck, id: string): Card | null => { const c = deck.cards().find(x => x.id === id); return c ? { ...c } : null; };
+export function restore(deck: Deck, before: Card): boolean { const cs = deck.cards(); const i = cs.findIndex(x => x.id === before.id); if (i < 0) return false; cs[i] = { ...before }; deck.add([]); return true; }

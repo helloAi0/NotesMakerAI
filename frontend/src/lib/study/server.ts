@@ -43,3 +43,6 @@ export async function pullInbox(s: Session, addTask: (t: { title: string; due: s
   const { items } = await call<{ items: InboxItem[] }>(s, 'GET', '/inbox', undefined, f); if (!items.length) return { tasks: 0, saved: 0 };
   const r = applyInbox(items, addTask, kv, existing); await call(s, 'POST', '/inbox/ack', { ids: r.ids }, f); return { tasks: r.tasks, saved: r.saved };
 }
+
+/** true when the server rejected our token (expired after 7 days, or account deleted) */
+export const isAuthFail = (e: unknown) => e instanceof ApiFail && e.status === 401;

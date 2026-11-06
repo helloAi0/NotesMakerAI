@@ -1,5 +1,5 @@
 import test from 'node:test'; import assert from 'node:assert/strict'; import crypto from 'node:crypto'; import fs from 'node:fs';
-import { parseDue, parseMessage, createBridge, telegram, whatsapp } from './bot.mjs'; import { createServer } from './server.mjs';
+import { parseDue, parseMessage, createBridge, telegram, whatsapp, serveWhatsApp } from './bot.mjs'; import { createServer } from './server.mjs';
 const NOW = new Date(2026, 10, 5, 10); // Thu 5 Nov 2026
 test('due dates', () => {
   assert.deepEqual(parseDue('revise ROS 2 commands tomorrow', NOW), { due: '2026-11-06', rest: 'revise ROS 2 commands' }); assert.equal(parseDue('submit lab on friday', NOW).due, '2026-11-06'); assert.equal(parseDue('exam on monday', NOW).due, '2026-11-09'); assert.equal(parseDue('read ch 3 in 3 days', NOW).due, '2026-11-08'); assert.equal(parseDue('viva on 12 nov', NOW).due, '2026-11-12'); assert.equal(parseDue('thing on 2 nov', NOW).due, '2027-11-02', 'past dates roll to next year'); assert.equal(parseDue('call mom today', NOW).due, '2026-11-05'); assert.equal(parseDue('just a note', NOW).due, ''); assert.equal(parseDue('plan day after tomorrow', NOW).due, '2026-11-07');
@@ -28,5 +28,12 @@ test('end to end with the real server and a fake Telegram / WhatsApp', async () 
     assert.deepEqual(wa.verify(new URLSearchParams('hub.mode=subscribe&hub.verify_token=vt&hub.challenge=77')), [200, '77']); assert.equal(wa.verify(new URLSearchParams('hub.mode=subscribe&hub.verify_token=no&hub.challenge=77'))[0], 403);
     const raw = JSON.stringify({ entry: [{ changes: [{ value: { messages: [{ from: '919999', type: 'text', text: { body: 'hello wa' } }] } }] }] }); const sig = 'sha256=' + crypto.createHmac('sha256', 'sec').update(raw).digest('hex');
     assert.equal((await wa.onWebhook(raw, 'sha256=bad'))[0], 401); assert.equal((await wa.onWebhook(raw, undefined))[0], 401); assert.equal((await wa.onWebhook(raw, sig))[0], 200); assert.match(out.at(-1)[1], /not linked/);
+    // audit: groups are refused, real HTTP webhook with signature, oversize body, wrong path
+    const sent2 = []; const tg2 = telegram({ token: 'T', handle, fetchImpl: async (u, o) => { sent2.push(JSON.parse(o.body).text); return { json: async () => ({}) }; } }); await tg2.onUpdate({ update_id: 9, message: { chat: { id: -5, type: 'group' }, text: 'remind me to x tomorrow' } }); assert.match(sent2[0], /private chat/); assert.equal((await (await fetch(api + '/inbox', { headers: auth })).json()).items.length, 2, 'nothing was queued from the group');
+    const hook = serveWhatsApp(wa, 0); await new Promise(r => hook.once('listening', r)); const hu = `http://127.0.0.1:${hook.address().port}/webhook`;
+    try { assert.equal(await (await fetch(hu + '?hub.mode=subscribe&hub.verify_token=vt&hub.challenge=abc')).text(), 'abc'); assert.equal((await fetch(hu + '?hub.mode=subscribe&hub.verify_token=bad&hub.challenge=abc')).status, 403);
+      assert.equal((await fetch(hu, { method: 'POST', body: raw, headers: { 'x-hub-signature-256': sig } })).status, 200); assert.equal((await fetch(hu, { method: 'POST', body: raw, headers: { 'x-hub-signature-256': 'sha256=00' } })).status, 401); assert.equal((await fetch(hu.replace('/webhook', '/x'))).status, 404); assert.equal((await fetch(hu, { method: 'PUT' })).status, 405);
+      assert.equal((await fetch(hu, { method: 'POST', body: 'not json', headers: { 'x-hub-signature-256': 'sha256=' + crypto.createHmac('sha256', 'sec').update('not json').digest('hex') } })).status, 400); } finally { hook.close(); }
+    assert.equal(parseDue('exam on thursday', NOW).due, '2026-11-12', 'same weekday means next week'); assert.equal(parseDue('exam on Friday evening', NOW).due, '2026-11-06');
   } finally { srv.close(); fs.rmSync(file, { force: true }); }
 });

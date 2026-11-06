@@ -92,3 +92,13 @@ Open **Study Studio** in the sidebar.
 7. **Notes marketplace** and 8. **Chat bot**: need the server in `server-api/` (see its README). UPI payments are direct creator-to-buyer with manual confirmation; no real payment processing.
 
 Tests: `npm run test:unit`, `npm run test:e2e` (includes `e2e_studio.mjs`, which runs the real server), `npm run test:server`.
+
+### Audit notes (what was found and fixed after the first release of Study Studio)
+- **Bhasha:** model output with Indic digits in term markers (⟦१⟧) was not restored; place and person names were frozen in English; whitespace around protected terms was lost; huge PDFs were sent in full (now capped at 30,000 characters with a visible notice); added Stop; scanned PDFs get an explanation; speech reads sentence by sentence (long text cut off before) and stops when you leave the tab.
+- **Exam engines:** unusable AI replies now show an error instead of an empty list.
+- **Handwriting:** `null`/array replies crashed the parser; slow photos could overwrite a newer scan; HEIC photos get a clear message.
+- **Voice:** a late end-of-speech event could skip sentences; word matching broke Hindi (combining vowel signs); markdown symbols were read aloud; a second request while thinking was interleaved; added a few Hindi commands.
+- **Code visualizer:** added f-strings, list comprehensions, keyword arguments, `global`, `any/all`, `key=`/`reverse=`; `+=` on lists now mutates in place like Python; large lists are capped per step; parser could crash on malformed code (found by fuzzing 30,000 mutated programs; now 0 crashes); the final step points at the failing line; Play restarts at the end.
+- **Swipe:** added Undo.
+- **Marketplace:** rights confirmation required; purchase status (pending/rejected) shown; reports need a 24-hour-old account and are rate-limited (stops brand-new accounts from mass-reporting a rival); expired sign-in is handled.
+- **Bot:** group chats are refused (anyone in a group could otherwise write to a linked user's inbox); code guessing is throttled per chat; Unlink and link status; WhatsApp webhook server included; the planner syncs in the background (every 5 minutes and on focus) once signed in.

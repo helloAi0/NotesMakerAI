@@ -34,4 +34,14 @@ const pyq = `2019\n1. Calculate the entropy change when 2 kg of ice melts at 0 C
 const qs = parsePyq(pyq); assert.equal(qs.length, 8); assert.equal(qs[0].year, 2019); assert.equal(qs[0].marks, 3); assert.equal(qs[7].year, 2022);
 const pt = pyqPatterns(qs); assert.ok(pt.topics.some(t => /entropy/.test(t.term)) && pt.topics.some(t => /carnot/.test(t.term)), JSON.stringify(pt.topics)); assert.deepEqual(pt.years, [2019, 2020, 2021, 2022]);
 assert.equal(pt.types[0].type, 'numerical'); assert.match(pt.verdict, /weak hints/); assert.match(pyqPatterns([]).verdict, /weak hints/);
+// ---- audit additions
+assert.equal(unmask('यह ⟦१⟧ और ⟦ ২ ⟧ और ⟦௩⟧', ['a', 'b', 'c', 'd']), 'यह b और c और d'); assert.equal(missingTokens('⟦0⟧ ⟦1⟧', '⟦०⟧').join(), '1', 'Indic digits count as present');
+const geo = maskTerms('Mahatma Gandhi visited New Delhi. Newton Second Law applies. Ohm Law holds.'); assert.ok(geo.text.includes('Mahatma Gandhi') && geo.text.includes('New Delhi'), 'person and place names are translated, not frozen'); assert.ok(geo.terms.some(t => /Second Law/.test(t)) && !geo.text.includes('Newton Second Law'), 'named laws are protected');
+const bigSrc = ('Entropy rises in every isolated system according to the second law. '.repeat(10) + '\n\n').repeat(60); let n2 = 0; const cnt = async (p: string) => { n2++; return p.split('PASSAGE:\n')[1]; };
+const rb = await flip(bigSrc, 'hi', cnt, { maxChars: 3000 }); assert.equal(rb.truncated, true); assert.ok(rb.usedChars === 3000 && n2 <= 5, `only the first part is converted (${n2} calls)`); assert.equal((await flip('short text', 'hi', cnt)).truncated, false);
+const ac = new AbortController(); let n3 = 0; const slow = async (p: string) => { n3++; ac.abort(); return p.split('PASSAGE:\n')[1]; }; await assert.rejects(flip(bigSrc, 'hi', slow, { signal: ac.signal, concurrency: 1, maxChars: 9000 }), /Stopped/); assert.ok(n3 <= 2, 'abort stops further model calls');
+const allDead = await flip('One. '.repeat(10) + '\n\n' + 'Two. '.repeat(10), 'hi', async () => '', { maxChars: 1000 }); assert.equal(allDead.failed, allDead.chunks, 'empty replies count as failures');
+// markdown / odd input to the masker must never throw or lose text
+for (const w of ['', '   ', '⟦0⟧ already a token', '$unclosed', 'x = ', '= = =', 'a'.repeat(5000), '😀 emoji ⟦ ⟧', 'f(x) = x^2 + 2x + 1, where x is real.']) { const mm = maskTerms(w); assert.equal(unmask(mm.text, mm.terms), w.replace(/⟦0⟧ already/, '⟦0⟧ already'), 'round trip: ' + w.slice(0, 20)); }
+assert.ok(parsePyq('1. ok\nQ2. a really long enough question about entropy and heat\n\n\n###\n').length === 1, 'junk lines are skipped'); assert.equal(pyqPatterns(parsePyq('2020\n' + 'Calculate the entropy of the system in a cycle.\n'.repeat(30))).topics[0].term.includes('entropy'), true);
 console.log('bhasha + boards OK');

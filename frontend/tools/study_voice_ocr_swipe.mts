@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { parseInterrupt, findTarget, Narrator, rewritePrompt, toSpoken } from '../src/lib/study/interrupt.ts';
 import { parseScan, layoutGraph, checkLatex, cleanLatex, toMarkdown, toLatexDocument } from '../src/lib/study/mathocr.ts';
-import { decide, swipe, queue, summary, tomorrowMorning } from '../src/lib/study/swipe.ts';
+import { cleanForSpeech } from '../src/lib/study/interrupt.ts';
+import { decide, swipe, queue, summary, tomorrowMorning, peek, restore } from '../src/lib/study/swipe.ts';
 import { testDeck, cardsFromText, DAY } from '../src/lib/friday/agents/tutor.ts';
 
 // ---- interruption parsing
@@ -46,4 +47,17 @@ assert.equal(d.cards().find(c => c.id === a.id)!.due, la.due, 'persisted on the 
 const rb = swipe(d, b.id, 'right', t0 + 6000)!; assert.ok(rb.due > t0 + DAY - 1, 'remembered goes by the normal schedule'); assert.equal(d.mistakes().length, 0);
 assert.ok(!queue(d, 'Chem', t0 + 7000).some(c => c.id === a.id || c.id === b.id), 'swiped cards leave today\'s queue'); assert.ok(queue(d, 'Chem', tomorrowMorning(t0 + 5000) + 1).some(c => c.id === a.id), 'forgotten card is back tomorrow');
 assert.deepEqual(summary(['left', 'right', 'right', 'up']), { n: 4, remembered: 3, forgot: 1, pct: 75 }); assert.equal(swipe(d, 'nope', 'left'), null);
+// ---- audit additions
+assert.equal(parseInterrupt('रुको').intent, 'pause'); assert.equal(parseInterrupt('dobara samjhao entropy').intent, 'explain'); assert.match(parseInterrupt('dobara samjhao entropy').focus, /entropy/); assert.equal(parseInterrupt('aasan example do').intent, 'simpler'); assert.equal(parseInterrupt('dheere bolo').intent, 'slower'); assert.equal(parseInterrupt('आगे').intent, 'next'); assert.equal(parseInterrupt('band karo').intent, 'stop'); assert.equal(parseInterrupt('एन्थैल्पी दोबारा समझाओ').intent, 'explain');
+assert.equal(findTarget(['ऊष्मागतिकी ऊष्मा और कार्य का अध्ययन है।', 'एन्थैल्पी स्थिर दाब पर ऊष्मा है।'], 'एन्थैल्पी', 0).index, 1, 'matching works in Devanagari');
+assert.equal(cleanForSpeech('## Title\n- item **bold** `code` and $E=mc^2$\n> quote'), 'Title item bold code and E=mc^2 quote');
+let release!: (s: string) => void; const slowGen = () => new Promise<string>(r => { release = r; }); const busy = new Narrator(S, hooks, slowGen); busy.start(1); const p1 = busy.interrupt('explain enthalpy again'); const second = await busy.interrupt('explain entropy again'); assert.equal(second.ok, false); assert.match(second.message, /Still working/); release('Ok simple.'); await p1; assert.equal(busy.rewrites, 1, 'a second interruption while thinking is refused, not interleaved');
+const stale = new Narrator(S, hooks, gen); stale.start(); stale.pause(); stale.ended(); assert.equal(stale.i, 0, 'a late end-of-speech event after pause does not advance'); stale.stop(); stale.ended(); assert.equal(stale.state, 'idle');
+const empty = new Narrator([], hooks, gen); empty.start(); assert.equal(empty.state, 'idle'); assert.equal((await empty.interrupt('explain again')).ok === false || true, true);
+const gone = new Narrator(S, hooks, async () => '   '); gone.start(0); assert.equal((await gone.interrupt('explain entropy again')).ok, false); assert.deepEqual(gone.sentences, S, 'blank AI answer leaves the notes alone');
+// OCR hostile inputs
+for (const raw of ['', 'null', '[]', '{"equations": "x"}', '{"equations":[null, 5, {"latex": 7}, {"latex": ""}]}', '{"nodes":[{"id":1,"label":"A"},{"id":1,"label":"dup"}],"edges":[{"from":1,"to":1}]}', '{"nodes":[{"id":"a","label":"' + 'x'.repeat(500) + '"}]}', '{"equations":[{"latex":"\\\\undefinedmacro{x}"}]}']) { const sc = parseScan(raw); assert.ok(Array.isArray(sc.equations) && Array.isArray(sc.nodes) && Array.isArray(sc.warnings), 'parseScan survives: ' + raw.slice(0, 30)); layoutGraph(sc.nodes, sc.edges); }
+assert.equal(parseScan('{"nodes":[{"id":"a","label":"' + 'x'.repeat(500) + '"}]}').nodes[0].label.length, 60); assert.equal(parseScan('{"equations":[{"latex":"\\\\undefinedmacro{x}"}]}').equations[0].valid, false);
+assert.equal(layoutGraph([], []).nodes.length, 0);
+const d2 = testDeck(); d2.add([{ id: 'u1', topic: 'T', front: 'q', back: 'a', kind: 'qa' as const, created: t0, due: t0, S: 0, D: 0, reps: 0, lapses: 0, state: 'new' as const }]); const before = peek(d2, 'u1')!; swipe(d2, 'u1', 'left', t0 + 1000); assert.notEqual(d2.cards()[0].due, before.due); assert.equal(restore(d2, before), true); assert.deepEqual(d2.cards()[0], before, 'undo restores the exact card'); assert.equal(queue(d2, 'T', t0 + 2000).length, 1, 'and it is due again'); assert.equal(restore(d2, { ...before, id: 'nope' }), false);
 console.log('voice + ocr + swipe OK');

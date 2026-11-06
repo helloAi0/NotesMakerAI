@@ -12,7 +12,7 @@ const PATTERNS: RegExp[] = [
   /\b[A-Za-z]\w*(?:\([^)\n]*\))?\s*=\s*[^\s,;.][^\n,;]*?(?=[.;,\n]|$)/g, // equations like F = m a, PV = nRT
   new RegExp(`\\b\\d+(?:\\.\\d+)?\\s?${UNIT}\\b`, 'g'),                // 9.8 m/s^2
   /\b[A-Z]{2,}[a-z]?\d*\b/g,                                          // DNA, ROS, CPU, JEE
-  /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/g,                               // Proper Multi-Word Terms
+  /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)*\s(?:Law|Laws|Theorem|Principle|Effect|Equation|Cycle|Constant|Rule|Number|Series|Reaction|Process|Transform|Inequality|Hypothesis)\b/g, // named laws; place/person names are NOT masked
   /\b\w+(?:-\w+)*\([^)\n]*\)/g,                                       // f(x), malloc(n)
 ];
 /** words that are technical in most STEM texts even when lower-case */
@@ -22,14 +22,19 @@ export function maskTerms(text: string, extra: string[] = []): Masked {
   const terms: string[] = []; const idx = new Map<string, number>();
   const tok = (s: string) => { let i = idx.get(s); if (i === undefined) { i = terms.length; terms.push(s); idx.set(s, i); } return `⟦${i}⟧`; };
   let out = text;
-  for (const re of PATTERNS) out = out.replace(re, m => (m.includes('⟦') ? m : tok(m.trim())));
+  const keepSpace = (m: string) => { const t = m.trim(); if (!t || m.includes('⟦')) return m; return m.slice(0, m.indexOf(t)) + tok(t) + m.slice(m.indexOf(t) + t.length); };
+  for (const re of PATTERNS) out = out.replace(re, keepSpace);
   const words = [...new Set([...GLOSSARY, ...extra.map(e => e.trim()).filter(Boolean)])].sort((a, b) => b.length - a.length);
   for (const w of words) out = out.replace(new RegExp(`(?<![\\w⟦])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w⟧])`, 'gi'), m => tok(m));
   return { text: out, terms };
 }
-export const unmask = (text: string, terms: string[]) => text.replace(/⟦\s*(\d+)\s*⟧/g, (m, i) => terms[+i] ?? m);
+/** models sometimes write token numbers in Indic digits: normalise before reading them */
+const DIGITS = '०१२३४५६७८९০১২৩৪৫৬৭৮৯௦௧௨௩௪௫௬௭௮௯౦౧౨౩౪౫౬౭౮౯';
+const asciiNum = (s: string) => [...s].map(c => { const i = DIGITS.indexOf(c); return i < 0 ? c : String(i % 10); }).join('');
+const TOKEN = /⟦\s*([0-9০-৯௦-௯౦-౯०-९]+)\s*⟧/g;
+export const unmask = (text: string, terms: string[]) => text.replace(TOKEN, (m, i) => terms[+asciiNum(i)] ?? m);
 /** tokens present in the source but missing from the model output */
-export const missingTokens = (src: string, out: string): number[] => { const have = new Set([...out.matchAll(/⟦\s*(\d+)\s*⟧/g)].map(m => +m[1])); return [...new Set([...src.matchAll(/⟦(\d+)⟧/g)].map(m => +m[1]))].filter(i => !have.has(i)); };
+export const missingTokens = (src: string, out: string): number[] => { const have = new Set([...out.matchAll(TOKEN)].map(m => +asciiNum(m[1]))); return [...new Set([...src.matchAll(/⟦(\d+)⟧/g)].map(m => +m[1]))].filter(i => !have.has(i)); };
 
 export function chunkText(text: string, max = 1400): string[] {
   const paras = text.replace(/\r/g, '').split(/\n{2,}/).map(p => p.trim()).filter(Boolean); const out: string[] = []; let cur = '';
@@ -37,7 +42,8 @@ export function chunkText(text: string, max = 1400): string[] {
   if (cur.trim()) out.push(cur.trim()); return out;
 }
 
-export interface FlipResult { lang: string; text: string; chunks: number; repaired: number; failed: number; termsKept: number; termsTotal: number }
+export interface FlipResult { lang: string; text: string; chunks: number; repaired: number; failed: number; termsKept: number; termsTotal: number; truncated: boolean; usedChars: number }
+export const FLIP_MAX_CHARS = 30000;
 export const flipPrompt = (langCode: string, masked: string, mode: 'notes' | 'translate') => {
   const l = langByCode(langCode); if (!l) throw new Error('unsupported language');
   return `You are an expert teacher writing for Indian students.
@@ -52,9 +58,10 @@ PASSAGE:
 ${masked}`;
 };
 
-export async function flip(source: string, langCode: string, gen: Gen, o: { mode?: 'notes' | 'translate'; terms?: string[]; onProgress?: (done: number, total: number) => void; concurrency?: number } = {}): Promise<FlipResult> {
-  const mode = o.mode ?? 'notes'; const chunks = chunkText(source); const results: string[] = new Array(chunks.length).fill(''); let repaired = 0, failed = 0, kept = 0, total = 0, done = 0;
+export async function flip(source: string, langCode: string, gen: Gen, o: { mode?: 'notes' | 'translate'; terms?: string[]; onProgress?: (done: number, total: number) => void; concurrency?: number; maxChars?: number; signal?: AbortSignal } = {}): Promise<FlipResult> {
+  const mode = o.mode ?? 'notes'; const cap = o.maxChars ?? FLIP_MAX_CHARS; const truncated = source.length > cap; const chunks = chunkText(truncated ? source.slice(0, cap) : source); const results: string[] = new Array(chunks.length).fill(''); let repaired = 0, failed = 0, kept = 0, total = 0, done = 0;
   const work = async (i: number) => {
+    if (o.signal?.aborted) { results[i] = ''; return; }
     const m = maskTerms(chunks[i], o.terms); total += m.terms.length; let out = '';
     for (let attempt = 0; attempt < 2; attempt++) {
       try { out = await gen(flipPrompt(langCode, m.text, mode)); } catch { out = ''; }
@@ -64,8 +71,9 @@ export async function flip(source: string, langCode: string, gen: Gen, o: { mode
     else { const miss = missingTokens(m.text, out); if (miss.length) out += `\n\n(${miss.map(k => m.terms[k]).join(', ')})`; kept += m.terms.length; results[i] = unmask(out, m.terms); }
     o.onProgress?.(++done, chunks.length);
   };
-  const q = [...chunks.keys()]; await Promise.all(Array.from({ length: Math.min(o.concurrency ?? 3, q.length) }, async () => { for (let i = q.shift(); i !== undefined; i = q.shift()) await work(i); }));
-  return { lang: langCode, text: results.join('\n\n'), chunks: chunks.length, repaired, failed, termsKept: kept, termsTotal: total };
+  const q = [...chunks.keys()]; await Promise.all(Array.from({ length: Math.min(o.concurrency ?? 3, q.length) }, async () => { for (let i = q.shift(); i !== undefined; i = q.shift()) { if (o.signal?.aborted) break; await work(i); } }));
+  if (o.signal?.aborted) throw new Error('Stopped.');
+  return { lang: langCode, text: results.filter(Boolean).join('\n\n'), chunks: chunks.length, repaired, failed, termsKept: kept, termsTotal: total, truncated, usedChars: Math.min(source.length, cap) };
 }
 
 /** Interface labels for the Study Studio. First-pass wording: needs review by native speakers before wide release. */
