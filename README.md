@@ -14,6 +14,13 @@ npm run dev
 Open the address it prints (usually http://localhost:5173). The microphone only works on `localhost` or HTTPS; use Chrome or Edge for dictation.
 Add your own AI key inside the app's settings. Never commit keys.
 
+## Deploy (Render + Vite)
+1. Push the repo to GitHub, then on Render: **New + > Blueprint** and pick it. `render.yaml` creates the static web app (`frontend`, built by Vite) and the accounts/marketplace server (`server-api`, `/healthz` health check).
+2. After the first deploy set `NM_ORIGIN` on the server to the web app URL and `VITE_API_BASE` on the web app to the server URL (then redeploy the web app). `NM_SECRET` and `NM_BOT_KEY` are generated for you.
+3. Optional: add `RZP_*` keys for online payments (webhook URL `https://<server>/webhooks/razorpay`, event `payment_link.paid`), and run the bot with `node bot.mjs --check` first.
+4. The web app works fully without the server. Note that Render's free tier has no persistent disk, so the server's accounts reset on redeploy: use the paid disk in `render.yaml` for real users. Env variables are listed in `.env.example`.
+5. First-time visitors see a 3D landing page (three.js, loaded only then). Reopen it with the sparkle button in the header or `#welcome`.
+
 ## Checks
 | Command | What it does |
 |---|---|
@@ -100,6 +107,12 @@ Tests: `npm run test:unit`, `npm run test:e2e` (includes `e2e_studio.mjs`, which
 - **App language:** header dropdown (English, Hindi, Marathi, Bengali, Tamil, Telugu) translates the menu, header, start banner and Study Studio headings. Lessons, simulations and most tool panels stay English. Translations are drafts without native-speaker review.
 - **Voice interruptions** understand Hindi, Marathi, Bengali, Tamil and Telugu command words (draft lists, not reviewed by native speakers) and the mic listens in the language chosen in the Voice tab.
 - `tools/e2e_sweep.mjs` visits every view, Studio tab and language at desktop and phone width and fails on any console error, failed request or overflow.
+
+### Final hardening pass
+- **Auth/security:** password change and "sign out other devices" (tokens carry a version that is revoked), `/healthz`, security headers on every API response, `NM_TRUST_PROXY` so rate limits work behind Render, strict CSP on the web app (`script-src` needs `'unsafe-eval'` only because FRIDAY's code sandbox runs your own snippets in a throwaway Worker). See `SECURITY.md` for the honest list of what is still missing (email verification/reset, external pen test, real database).
+- **3D landing page** (`components/Landing.tsx`, three.js in a lazy chunk): reduced-motion still frame, no-WebGL fallback, Escape/Skip, shown once to real first-time visitors (automated browsers skip it; open with `#welcome`).
+- **Tests added:** `e2e_landing`, `e2e_sweep` (every view/tab/language), `e2e_monkey` (clicks every button: 271 clicks, clean), plus server `security.test.mjs`, `gateway.test.mjs`.
+- Deployment: `render.yaml`, `.env.example`, `CONTRIBUTING.md`; CI now also runs the new server tests.
 
 ### Audit notes (what was found and fixed after the first release of Study Studio)
 - **Bhasha:** model output with Indic digits in term markers (⟦१⟧) was not restored; place and person names were frozen in English; whitespace around protected terms was lost; huge PDFs were sent in full (now capped at 30,000 characters with a visible notice); added Stop; scanned PDFs get an explanation; speech reads sentence by sentence (long text cut off before) and stops when you leave the tab.

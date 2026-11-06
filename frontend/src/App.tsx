@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { register } from './lib/agentBus';
 import { touch } from './lib/activity';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -24,6 +24,7 @@ const TeachView = lazy(() => import('./components/TeachView'));
 const ProgressView = lazy(() => import('./components/ProgressView'));
 const GeneratorView = lazy(() => import('./components/GeneratorView'));
 const SettingsModal = lazy(() => import('./components/SettingsModal'));
+const Landing = lazy(() => import('./components/Landing'));
 const SearchPalette = lazy(() => import('./components/SearchPalette'));
 function TeachGate({ children }: { children: React.ReactNode }) {
   const p = getProfile(); const [ok, setOk] = useState(() => { try { return !p?.pin || sessionStorage.getItem('nm_teach_ok') === '1'; } catch { return !p?.pin; } }); const [pin, setPin] = useState(''); const [bad, setBad] = useState(false);
@@ -49,6 +50,8 @@ const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', Lay
 export default function App() {
   const t = useT();
   const [searchQuery, setSearchQuery] = useState('');
+  const [landing, setLanding] = useState(() => { try { if (location.hash === '#welcome') return true; if (navigator.webdriver || localStorage.getItem('nm_landing_seen')) return false; return true; } catch { return false; } });
+  const enter = useCallback(() => { try { localStorage.setItem('nm_landing_seen', '1'); } catch { /* private mode */ } if (location.hash === '#welcome') history.replaceState(null, '', location.pathname + location.search); setLanding(false); }, []);
   const [activeTab, setActiveTabRaw] = useState('notebook');
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -115,6 +118,7 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2 md:gap-4">
             <button onClick={() => setSearchOpen(true)} aria-label="Search" className="sm:hidden p-2 rounded-lg border border-amber-200 bg-white text-amber-800"><Search className="w-4 h-4"/></button>
+            <button onClick={() => setLanding(true)} aria-label="Welcome page" title="Welcome page" data-testid="open-landing" className="hidden sm:inline-flex border border-amber-200 rounded-lg bg-white text-amber-900 text-xs py-2 px-2">✨</button>
             <select value={getUiLang()} onChange={e => setUiLang(e.target.value)} aria-label="App language" data-testid="ui-lang" className="border border-amber-200 rounded-lg bg-white text-amber-900 text-xs py-2 px-1 max-w-24">{UI_LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
             <button onClick={() => window.dispatchEvent(new Event('nm:open-settings'))} aria-label="Settings" title="Settings (AI key, backup)" data-testid="open-settings" className="p-2 rounded-lg border border-amber-200 bg-white text-amber-800 hover:bg-amber-50"><Settings className="w-4 h-4"/></button>
             <button 
@@ -127,6 +131,7 @@ export default function App() {
           </div>
         </header>
 
+        {landing && <Suspense fallback={null}><Landing onEnter={enter} /></Suspense>}
         <StartBanner go={setActiveTab} />
         {/* Render Active View */}
         <div className="flex-1 overflow-hidden">

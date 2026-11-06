@@ -1,0 +1,45 @@
+# Render Blueprint: one-click deploy of the web app (static) and the accounts/marketplace server.
+# Dashboard: New + > Blueprint > pick this repo. After the first deploy, set the two values marked sync:false.
+services:
+  - type: web
+    name: notes-maker-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: true
+    headers:
+      - { path: "/*", name: X-Content-Type-Options, value: nosniff }
+      - { path: "/*", name: X-Frame-Options, value: DENY }
+      - { path: "/*", name: Referrer-Policy, value: strict-origin-when-cross-origin }
+      - { path: "/*", name: Permissions-Policy, value: "camera=(self), microphone=(self), geolocation=(), payment=()" }
+      - path: "/*"
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: data:; font-src 'self' data:; connect-src *; frame-src https://www.youtube-nocookie.com https://www.youtube.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - { path: "/sw.js", name: Cache-Control, value: "no-cache" }
+      - { path: "/assets/*", name: Cache-Control, value: "public, max-age=31536000, immutable" }
+    routes:
+      - { type: rewrite, source: "/*", destination: /index.html }
+    envVars:
+      - { key: NODE_VERSION, value: "22" }
+      - { key: VITE_API_BASE, sync: false }      # URL of notes-maker-server, so the Account tab is pre-filled
+
+  - type: web
+    name: notes-maker-server
+    runtime: node
+    rootDir: server-api
+    plan: starter            # a persistent disk needs a paid plan; on free, accounts reset on every deploy/sleep
+    buildCommand: "true"
+    startCommand: node server.mjs
+    healthCheckPath: /healthz
+    disk: { name: nm-data, mountPath: /var/data, sizeGB: 1 }
+    envVars:
+      - { key: NODE_VERSION, value: "22" }
+      - { key: NM_DATA, value: /var/data/data.json }
+      - { key: NM_SECRET, generateValue: true }
+      - { key: NM_TRUST_PROXY, value: "1" }
+      - { key: NM_ORIGIN, sync: false }          # your web app URL, e.g. https://notes-maker-web.onrender.com
+      - { key: NM_BOT_KEY, generateValue: true }
+      - { key: RZP_KEY_ID, sync: false }         # optional: enables online payments
+      - { key: RZP_KEY_SECRET, sync: false }
+      - { key: RZP_WEBHOOK_SECRET, sync: false }

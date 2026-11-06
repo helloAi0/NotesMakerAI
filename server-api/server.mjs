@@ -26,14 +26,23 @@ export function createServer({ dataFile = './data.json', secret = process.env.NM
     'POST /register': (b) => {
       const email = clean(b.email, 120).toLowerCase(), pw = String(b.password ?? ''), role = b.role === 'teacher' ? 'teacher' : 'student';
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return [400, { error: 'Enter a valid email.' }]; if (pw.length < 8) return [400, { error: 'Password must be at least 8 characters.' }]; if (db.users[email]) return [409, { error: 'That email is already registered.' }];
-      const salt = crypto.randomBytes(16).toString('hex'); db.users[email] = { email, name: clean(b.name, 60) || email.split('@')[0], role, salt, hash: hash(pw, salt), created: now() }; save();
-      return [201, { token: sign({ sub: email, role, exp: now() + TOKEN_TTL }), user: pub(db.users[email]) }];
+      const salt = crypto.randomBytes(16).toString('hex'); db.users[email] = { email, name: clean(b.name, 60) || email.split('@')[0], role, salt, hash: hash(pw, salt), created: now(), tv: 0 }; save();
+      return [201, { token: sign({ sub: email, role, tv: 0, exp: now() + TOKEN_TTL }), user: pub(db.users[email]) }];
     },
     'POST /login': (b, _u, ip) => {
       if (limited('login:' + ip, 10, 60_000)) return [429, { error: 'Too many attempts. Wait a minute.' }]; const u = db.users[clean(b.email, 120).toLowerCase()]; const pw = String(b.password ?? '');
       const ok = u && crypto.timingSafeEqual(Buffer.from(hash(pw, u.salt)), Buffer.from(u.hash)); if (!ok) return [401, { error: 'Wrong email or password.' }];
-      return [200, { token: sign({ sub: u.email, role: u.role, exp: now() + TOKEN_TTL }), user: pub(u) }];
+      return [200, { token: sign({ sub: u.email, role: u.role, tv: u.tv ?? 0, exp: now() + TOKEN_TTL }), user: pub(u) }];
     },
+    'POST /me/password': (b, u) => {
+      if (limited('pw:' + u.email, 5, 600_000)) return [429, { error: 'Too many attempts. Wait ten minutes.' }];
+      const cur = String(b.current ?? ''), next = String(b.next ?? ''); if (!crypto.timingSafeEqual(Buffer.from(hash(cur, u.salt)), Buffer.from(u.hash))) return [401, { error: 'Current password is wrong.' }];
+      if (next.length < 8) return [400, { error: 'New password must be at least 8 characters.' }]; if (next === cur) return [400, { error: 'Choose a different password.' }];
+      u.salt = crypto.randomBytes(16).toString('hex'); u.hash = hash(next, u.salt); u.tv = (u.tv ?? 0) + 1; save();
+      return [200, { token: sign({ sub: u.email, role: u.role, tv: u.tv, exp: now() + TOKEN_TTL }), message: 'Password changed. All other devices were signed out.' }];
+    },
+    'POST /me/logout-all': (_b, u) => { u.tv = (u.tv ?? 0) + 1; save(); return [200, { token: sign({ sub: u.email, role: u.role, tv: u.tv, exp: now() + TOKEN_TTL }), message: 'Signed out everywhere else.' }]; },
+    'GET /healthz': () => [200, { ok: true, users: Object.keys(db.users).length }],
     'GET /me': (_b, u) => [200, { user: pub(u) }],
     'POST /classes': (b, u) => { if (u.role !== 'teacher') return [403, { error: 'Only teachers can create classes.' }]; const code = crypto.randomBytes(3).toString('hex').toUpperCase(); db.classes[code] = { code, name: clean(b.name, 80) || 'Class', teacher: u.email, students: [], created: now() }; save(); return [201, { class: db.classes[code] }]; },
     'GET /classes': (_b, u) => [200, { classes: Object.values(db.classes).filter(c => (u.role === 'teacher' ? c.teacher === u.email : c.students.includes(u.email))) }],
@@ -100,14 +109,14 @@ export function createServer({ dataFile = './data.json', secret = process.env.NM
   const confirmedSales = id => Object.values(db.purchases).filter(p => p.listing === id && p.status === 'confirmed').length;
   const botOk = h => { const k = process.env.NM_BOT_KEY || ''; const got = String(h['x-bot-key'] || ''); return k.length >= 16 && got.length === k.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(k)); };
   const pub = u => ({ email: u.email, name: u.name, role: u.role });
-  const PUBLIC = new Set(['POST /register', 'POST /login', 'GET /market/listings', 'POST /bot/claim', 'POST /bot/push', 'POST /webhooks/razorpay', 'GET /market/config']);
+  const PUBLIC = new Set(['POST /register', 'POST /login', 'GET /market/listings', 'POST /bot/claim', 'POST /bot/push', 'POST /webhooks/razorpay', 'GET /market/config', 'GET /healthz']);
   const server = http.createServer(async (req, res) => {
-    const origin = req.headers.origin; const send = (code, obj) => { const h = { 'content-type': 'application/json', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' }; if (allowOrigin && origin === allowOrigin) { h['access-control-allow-origin'] = origin; h['vary'] = 'origin'; h['access-control-allow-headers'] = 'authorization,content-type'; h['access-control-allow-methods'] = 'GET,POST,PUT,DELETE'; } res.writeHead(code, h); res.end(JSON.stringify(obj)); };
+    const origin = req.headers.origin; const send = (code, obj) => { const h = { 'content-type': 'application/json', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'referrer-policy': 'no-referrer', 'cross-origin-resource-policy': 'same-site', 'strict-transport-security': 'max-age=15552000; includeSubDomains', 'content-security-policy': "default-src 'none'; frame-ancestors 'none'" }; if (allowOrigin && origin === allowOrigin) { h['access-control-allow-origin'] = origin; h['vary'] = 'origin'; h['access-control-allow-headers'] = 'authorization,content-type'; h['access-control-allow-methods'] = 'GET,POST,PUT,DELETE'; } res.writeHead(code, h); res.end(JSON.stringify(obj)); };
     try {
       if (req.method === 'OPTIONS') return send(204, {}); const url = new URL(req.url, 'http://x'); const key = `${req.method} ${url.pathname}`; const fn = routes[key]; if (!fn) return send(404, { error: 'Not found.' });
       let body = {}, raw = ''; if (req.method === 'POST' || req.method === 'PUT') { const chunks = []; let n = 0; for await (const c of req) { n += c.length; if (n > MAX_BODY) { const sock = req.socket; res.on('finish', () => sock && sock.destroy()); res.writeHead(413, { 'content-type': 'application/json', connection: 'close' }); return res.end(JSON.stringify({ error: 'Request too large.' })); } chunks.push(c); } raw = Buffer.concat(chunks).toString(); try { body = JSON.parse(raw || '{}'); } catch { return send(400, { error: 'Invalid JSON.' }); } }
-      let user = null; if (!PUBLIC.has(key)) { const p = verify((req.headers.authorization || '').replace(/^Bearer\s+/i, '')); user = p && db.users[p.sub]; if (!user) return send(401, { error: 'Sign in first.' }); }
-      const [code, out] = await fn(body, user, req.socket.remoteAddress || 'x', url.searchParams, req.headers, raw); send(code, out);
+      let user = null; if (!PUBLIC.has(key)) { const p = verify((req.headers.authorization || '').replace(/^Bearer\s+/i, '')); user = p && db.users[p.sub]; if (user && (p.tv ?? 0) !== (user.tv ?? 0)) user = null; if (!user) return send(401, { error: 'Sign in first.' }); }
+      const [code, out] = await fn(body, user, (process.env.NM_TRUST_PROXY === '1' && String(req.headers['x-forwarded-for'] || '').split(',').pop().trim()) || req.socket.remoteAddress || 'x', url.searchParams, req.headers, raw); send(code, out);
     } catch (e) { send(500, { error: 'Server error.' }); console.error(e); }
   });
   return server;
