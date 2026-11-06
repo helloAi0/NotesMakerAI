@@ -80,3 +80,15 @@ npx tsx tools/fuzz.mts         # every simulation x parameter combinations
 ## Lecture to Notes (Phase 9)
 
 Sidebar → **Lecture to Notes**. Paste a YouTube link and the lecture transcript (YouTube ⋯ → Show transcript → copy, or load an `.srt`/`.vtt`/`.txt` file). The app keeps timestamps, splits the lecture into topic sections (lexical cohesion), and writes a summary, key points, formulas (written or spoken, e.g. "delta U equals Q minus W" → `ΔU = Q − W`), definitions and key terms. Clicking a timestamp seeks the embedded player; the active section follows the video. Save to Notebook, copy, download `.md`, or *Improve with AI* (your own key). All analysis runs on the device; only the video embed needs internet. Browsers cannot fetch YouTube transcripts directly (CORS), so the transcript is pasted or loaded from a file.
+
+## Study Studio (eight tools for Indian students)
+Open **Study Studio** in the sidebar.
+1. **Bhasha**: upload a PDF or paste text, get notes (or a faithful translation) in Hindi, Marathi, Bengali, Tamil or Telugu. Technical terms, formulas and units are masked before the model sees them and restored after, and the app reports how many were kept. Listen with your device's voice. Buttons switch language; the rest of the app UI is English.
+2. **Exam engines**: CBSE (step marking), JEE Main/Advanced, NEET, UPSC, GATE note styles and practice questions. No past papers are bundled: paste your own previous-year questions and it finds repeating topics and question types in that sample.
+3. **Handwriting → LaTeX**: photo of a notebook page → LaTeX (checked with KaTeX, editable) and clickable flowcharts/circuit-style diagrams. Needs a vision-capable model.
+4. **Voice tutor**: narrates notes; press the mic (or type) “Wait, explain that enthalpy part again with an easier example” and that part is rewritten and spoken. Also: pause, continue, next, back, slower, faster, stop.
+5. **Code visualizer**: Python (classes, lists, dicts, loops, recursion) in a safe built-in interpreter with a step-by-step memory/pointer view. C++ is translated to Python by AI first (review it).
+6. **Swipe recall**: swipe/drag/arrow keys; forgotten cards return tomorrow 8:00.
+7. **Notes marketplace** and 8. **Chat bot**: need the server in `server-api/` (see its README). UPI payments are direct creator-to-buyer with manual confirmation; no real payment processing.
+
+Tests: `npm run test:unit`, `npm run test:e2e` (includes `e2e_studio.mjs`, which runs the real server), `npm run test:server`.

@@ -19,6 +19,7 @@ const PlannerView = lazy(() => import('./components/PlannerView'));
 const LectureNotesStudio = lazy(() => import('./components/LectureNotesStudio'));
 const PracticeView = lazy(() => import('./components/PracticeView'));
 const PlatformView = lazy(() => import('./components/PlatformView'));
+const StudioView = lazy(() => import('./components/StudioView'));
 const TeachView = lazy(() => import('./components/TeachView'));
 const ProgressView = lazy(() => import('./components/ProgressView'));
 const GeneratorView = lazy(() => import('./components/GeneratorView'));
@@ -40,7 +41,7 @@ function StartBanner({ go }: { go: (v: string) => void }) {
 const Loading = () => <div className="h-full flex items-center justify-center text-sm text-slate-500 p-8">Loading…</div>;
 import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity, Menu, X, Bot, Settings, Wifi, WifiOff, Clapperboard, Target, TrendingUp, GraduationCap, Rocket } from 'lucide-react';
 
-const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', LayoutDashboard], ['friday', 'FRIDAY Assistant', Bot], ['generator', 'AI Note Generator', Sparkles], ['notebook', 'Digital Notebook', PenTool], ['lecture', 'Lecture to Notes', Clapperboard], ['simulations', 'Visuals Studio', Activity], ['planner', 'Study Planner', Calendar], ['library', 'PDF & Source Library', FileText], ['practice', 'Practice', Target], ['progress', 'My Progress', TrendingUp], ['teach', 'Teach', GraduationCap], ['platform', 'Platform', Rocket]];
+const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', LayoutDashboard], ['friday', 'FRIDAY Assistant', Bot], ['generator', 'AI Note Generator', Sparkles], ['notebook', 'Digital Notebook', PenTool], ['lecture', 'Lecture to Notes', Clapperboard], ['simulations', 'Visuals Studio', Activity], ['planner', 'Study Planner', Calendar], ['library', 'PDF & Source Library', FileText], ['practice', 'Practice', Target], ['progress', 'My Progress', TrendingUp], ['teach', 'Teach', GraduationCap], ['studio', 'Study Studio', Sparkles], ['platform', 'Platform', Rocket]];
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -140,6 +141,7 @@ export default function App() {
             {activeTab === 'progress' && <ProgressView />}
             {activeTab === 'teach' && <TeachGate><TeachView /></TeachGate>}
             {activeTab === 'platform' && <PlatformView />}
+            {activeTab === 'studio' && <StudioView />}
             {activeTab === 'library' && <PdfSourceLibrary />}
           </Suspense>
           </ErrorBoundary>

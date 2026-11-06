@@ -47,3 +47,38 @@ test('persistence and account deletion (privacy right)', async () => {
   const r = await fetch(b2 + '/me', { headers: { authorization: 'Bearer ' + student } }); assert.equal(r.status, 200, 'data survives a restart'); srv2.close();
   assert.equal((await call('DELETE', '/me', null, student)).s, 200); assert.equal((await call('GET', '/me', null, student)).s, 401); assert.ok(!/asha@school/.test(fs.readFileSync(file, 'utf8')), 'account and its data are gone');
 });
+
+/* ---------- marketplace + bot inbox ---------- */
+process.env.NM_BOT_KEY = 'k'.repeat(24);
+const mk = async (email) => { const r = await call('POST', '/register', { email, password: 'market-pass-1', name: email.split('@')[0] }); return r.j.token; };
+const body = 'Thermodynamics revision. '.repeat(20);
+test('marketplace: publish, browse, UPI purchase, unlock', async () => {
+  const sel = await mk('creator@x.in'), buy = await mk('buyer@x.in'), other = await mk('other@x.in');
+  assert.equal((await call('POST', '/market/listings', { title: 'ab', body }, sel)).s, 400); assert.equal((await call('POST', '/market/listings', { title: 'Thermo notes', body: 'short' }, sel)).s, 400);
+  assert.equal((await call('POST', '/market/listings', { title: 'Thermo notes', body, price: 3, upi: 'a@b' }, sel)).s, 400, 'price under 5'); assert.equal((await call('POST', '/market/listings', { title: 'Thermo notes', body, price: 50 }, sel)).s, 400, 'paid needs UPI id');
+  const paid = (await call('POST', '/market/listings', { title: 'Thermo premium', subject: 'Physics', body, price: 50, upi: 'creator@okbank' }, sel)); assert.equal(paid.s, 201); const free = (await call('POST', '/market/listings', { title: 'Thermo free', subject: 'Physics', body, price: 0 }, sel)).j.listing;
+  const list = await call('GET', '/market/listings?subject=physics'); assert.equal(list.s, 200, 'browsing needs no account'); assert.equal(list.j.listings.length, 2); assert.ok(list.j.listings.every(l => !('body' in l) && !('upi' in l)), 'list shows previews only, never body or UPI id');
+  assert.equal((await call('GET', '/market/listings?q=premium')).j.listings.length, 1);
+  assert.equal((await call('GET', `/market/listing?id=${free.id}`, null, buy)).j.unlocked, true);
+  const locked = await call('GET', `/market/listing?id=${paid.j.listing.id}`, null, buy); assert.equal(locked.j.unlocked, false); assert.ok(!locked.j.listing.body); assert.equal(locked.j.pay.upi, 'creator@okbank'); assert.equal(locked.j.pay.amount, 50);
+  assert.equal((await call('POST', '/market/purchase', { id: paid.j.listing.id, utr: '123' }, buy)).s, 400); const pur = await call('POST', '/market/purchase', { id: paid.j.listing.id, utr: '412345678901' }, buy); assert.equal(pur.s, 201);
+  assert.equal((await call('POST', '/market/purchase', { id: paid.j.listing.id, utr: '412345678901' }, other)).s, 409, 'UTR cannot be reused');
+  assert.equal((await call('GET', `/market/listing?id=${paid.j.listing.id}`, null, buy)).j.unlocked, false, 'still locked until confirmed');
+  assert.equal((await call('POST', '/market/confirm', { purchase: pur.j.purchase.id }, other)).s, 403, 'only the creator confirms'); assert.equal((await call('POST', '/market/confirm', { purchase: pur.j.purchase.id }, buy)).s, 403);
+  assert.equal((await call('POST', '/market/confirm', { purchase: pur.j.purchase.id }, sel)).s, 200);
+  const un = await call('GET', `/market/listing?id=${paid.j.listing.id}`, null, buy); assert.equal(un.j.unlocked, true); assert.ok(un.j.listing.body.length > 200); assert.equal((await call('GET', `/market/listing?id=${paid.j.listing.id}`, null, other)).j.unlocked, false);
+  const mine = await call('GET', '/market/mine', null, sel); assert.equal(mine.j.listings.find(l => l.id === paid.j.listing.id).sales, 1); assert.equal((await call('GET', '/market/mine', null, buy)).j.bought.length, 1);
+  for (const t of [other, buy, sel]) await call('POST', '/market/report', { id: free.id }, t); assert.equal((await call('GET', '/market/listings?q=free')).j.listings.length, 0, '3 reports hide a listing');
+  assert.equal((await call('POST', '/market/unlist', { id: paid.j.listing.id }, other)).s, 403); assert.equal((await call('POST', '/market/unlist', { id: paid.j.listing.id }, sel)).s, 200);
+  const raw = fs.readFileSync(file, 'utf8'); assert.ok(!/market-pass-1/.test(raw));
+});
+test('bot inbox: link a chat, push items, app pulls and acknowledges', async () => {
+  const me = await mk('botuser@x.in'); const KEY = { 'x-bot-key': process.env.NM_BOT_KEY };
+  const lk = await call('POST', '/bot/link', {}, me); assert.equal(lk.s, 201); assert.match(lk.j.code, /^[0-9A-F]{6}$/);
+  assert.equal((await call('POST', '/bot/claim', { code: lk.j.code, chat: 'tg:42' })).s, 401, 'bot key required'); assert.equal((await call('POST', '/bot/claim', { code: 'ZZZZZZ', chat: 'tg:42' }, null, KEY)).s, 404);
+  assert.equal((await call('POST', '/bot/push', { chat: 'tg:42', items: [{ kind: 'note', text: 'x' }] }, null, KEY)).s, 404, 'unlinked chat'); assert.equal((await call('POST', '/bot/claim', { code: lk.j.code, chat: 'tg:42' }, null, KEY)).s, 200); assert.equal((await call('POST', '/bot/claim', { code: lk.j.code, chat: 'tg:43' }, null, KEY)).s, 404, 'code is single use');
+  assert.equal((await call('POST', '/bot/push', { chat: 'tg:42', source: 'telegram', items: [{ kind: 'task', title: 'Revise ROS 2 commands <b>', due: '2026-11-06' }, { kind: 'link', url: 'https://youtu.be/abc', title: 'lecture' }, { kind: 'link', url: 'javascript:alert(1)', title: 'bad' }] }, null, KEY)).j.queued, 3);
+  const inbox = (await call('GET', '/inbox', null, me)).j.items; assert.equal(inbox.length, 3); assert.equal(inbox[0].title, 'Revise ROS 2 commands b'); assert.equal(inbox[0].due, '2026-11-06'); assert.equal(inbox[2].url, '', 'non-http link dropped');
+  await call('POST', '/inbox/ack', { ids: [inbox[0].id, inbox[1].id] }, me); assert.equal((await call('GET', '/inbox', null, me)).j.items.length, 1);
+  const other = await mk('nobody@x.in'); assert.equal((await call('GET', '/inbox', null, other)).j.items.length, 0, 'inbox is per user');
+});

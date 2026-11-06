@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { cleanBase, call, signIn, validVpa, validUtr, priceOk, upiLink, applyInbox, pullInbox, savedItems, loadSession, saveSession } from '../src/lib/study/server.ts';
+import { memKV } from '../src/lib/kv.ts';
+assert.equal(cleanBase(' https://a.com/ '), 'https://a.com'); assert.equal(cleanBase('http://192.168.1.5:8787'), 'http://192.168.1.5:8787'); assert.throws(() => cleanBase('http://evil.com'), /https/); assert.throws(() => cleanBase('nope'), /server address/);
+assert.ok(validVpa('asha@okhdfc') && validVpa('a.b-c_1@ybl') && !validVpa('asha') && !validVpa('a@b') && !validVpa('a b@ybl')); assert.ok(validUtr('412345678901') && !validUtr('1234') && !validUtr('41234567890a'));
+assert.ok(priceOk(0) && priceOk(5) && priceOk(500) && !priceOk(4) && !priceOk(501) && !priceOk(10.5));
+const u = upiLink({ pa: 'asha@okhdfc', pn: 'Asha Rao', am: 50, tn: 'Thermo notes', tr: 'NM123' }); assert.match(u, /^upi:\/\/pay\?pa=asha%40okhdfc&pn=Asha%20Rao&am=50\.00&cu=INR&tn=Thermo%20notes&tr=NM123$/); assert.throws(() => upiLink({ pa: 'bad', pn: 'x', am: 5, tn: 'x' }));
+const ok = (j: unknown, status = 200) => (async () => ({ ok: status < 400, status, json: async () => j })) as unknown as typeof fetch;
+assert.rejects(call({ base: 'https://x' }, 'GET', '/m', undefined, (async () => { throw new Error('net'); }) as unknown as typeof fetch), /Cannot reach/);
+await assert.rejects(call({ base: 'https://x' }, 'GET', '/m', undefined, ok({ error: 'Wrong email or password.' }, 401)), /Wrong email/); await assert.rejects(call({ base: 'https://x' }, 'GET', '/m', undefined, ok({}, 500)), /Server error \(500\)/);
+const s = await signIn('https://x.in/', 'a@b.co', 'pw', 'login', '', ok({ token: 'T', user: { email: 'a@b.co', name: 'A' } })); assert.deepEqual(s, { base: 'https://x.in', token: 'T', email: 'a@b.co', name: 'A' });
+const kv = memKV(); assert.equal(loadSession(kv), null); saveSession(s, kv); assert.equal(loadSession(kv)!.token, 'T'); saveSession(null, kv); assert.equal(loadSession(kv), null);
+const items = [{ id: '1', kind: 'task', title: 'Revise ROS 2', due: '2026-11-06', url: '', text: '', source: 'telegram', t: 1 }, { id: '2', kind: 'link', title: 'lecture', due: '', url: 'https://youtu.be/x', text: '', source: 'telegram', t: 2 }, { id: '3', kind: 'task', title: 'Duplicate', due: '', url: '', text: '', source: 'x', t: 3 }] as const;
+const added: { title: string }[] = []; const kv2 = memKV(); const r = applyInbox([...items], t => added.push(t), kv2, [{ title: 'duplicate', due: '' }]); assert.deepEqual([r.tasks, r.saved], [1, 1]); assert.equal(added[0].title, 'Revise ROS 2'); assert.equal(savedItems(kv2).length, 1);
+applyInbox([...items], t => added.push(t), kv2, []); assert.equal(savedItems(kv2).length, 1, 'saved items are not duplicated');
+const calls: string[] = []; const fakeF = (async (url: string, o?: RequestInit) => { calls.push((o?.method || 'GET') + ' ' + url.replace('https://x', '')); return { ok: true, status: 200, json: async () => (url.endsWith('/inbox') ? { items: [items[0]] } : { ok: true }) }; }) as unknown as typeof fetch;
+const pr = await pullInbox({ base: 'https://x', token: 'T', email: '', name: '' }, t => added.push(t), [], memKV(), fakeF); assert.equal(pr.tasks, 1); assert.deepEqual(calls, ['GET /inbox', 'POST /inbox/ack']);
+console.log('study server client OK');

@@ -1,0 +1,154 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { box, btn, dark, useAI, saveFile } from './ui';
+import { Msg } from './shared';
+import { trace, EXAMPLES, cppToPythonPrompt } from '../../lib/study/pytrace';
+import type { Trace, Step, Cell } from '../../lib/study/pytrace';
+import { deck } from '../../lib/friday/agentsRuntime';
+import { cardsFromText } from '../../lib/friday/agents/tutor';
+import type { Card } from '../../lib/friday/agents/tutor';
+import { decide, swipe, queue, summary } from '../../lib/study/swipe';
+import type { Dir } from '../../lib/study/swipe';
+import { loadSession, saveSession, signIn, call, upiLink, validVpa, validUtr, priceOk, pullInbox, savedItems } from '../../lib/study/server';
+import type { Session } from '../../lib/study/server';
+import { addTask, listTasks } from '../../lib/planner';
+
+/* ---------------- 5. Code / pointer visualizer ---------------- */
+const RW = 176, RH = 20;
+function Heap({ step }: { step: Step }) {
+  const heap = step.heap; const cols = 3; const place = new Map<number, { x: number; y: number; h: number }>(); const ys = [0, 0, 0];
+  heap.forEach((h, i) => { const c = i % cols; const hh = 24 + Math.max(1, h.items.length) * RH; place.set(h.id, { x: 250 + c * (RW + 36), y: 10 + ys[c], h: hh }); ys[c] += hh + 18; });
+  const vars = step.frames.flatMap((f, fi) => [{ head: f.name, y: 0, fi }, ...f.vars.map(v => ({ ...v, fi }))]); const vpos = vars.map((_, i) => 10 + vars.slice(0, i).reduce((a, v) => a + ('head' in v ? 24 : RH + 4), 0)); const vy = 10 + vars.reduce((a, v) => a + ('head' in v ? 24 : RH + 4), 0);
+  const H = Math.max(vy, ...ys, 60) + 20; const W = 250 + cols * (RW + 36); const changed = new Set(step.changed);
+  const arrow = (x1: number, y1: number, id: number, key: string) => { const t = place.get(id); if (!t) return null; const x2 = t.x, y2 = t.y + 12; return <path key={key} d={`M${x1},${y1} C${x1 + 40},${y1} ${x2 - 40},${y2} ${x2},${y2}`} fill="none" stroke="#2563eb" strokeWidth="1.4" markerEnd="url(#pa)" />; };
+  return (
+    <svg width={W} height={H} role="img" aria-label="Memory: variables and the objects they point to" data-testid="heap"><defs><marker id="pa" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2563eb" /></marker></defs>
+      {vars.map((v, i) => 'head' in v ? <text key={'h' + i} x={8} y={vpos[i] + 14} fontSize="12" fontWeight="700" fill="#0f172a">{v.head}</text> : <g key={i}><rect x={8} y={vpos[i]} width={200} height={RH} fill={changed.has(`${step.frames[v.fi].name}.${v.name}`) ? '#fde68a' : '#f8fafc'} stroke="#cbd5e1" /><text x={14} y={vpos[i] + 14} fontSize="12" fill="#334155">{v.name}</text>{'prim' in v.v ? <text x={90} y={vpos[i] + 14} fontSize="12" fontFamily="monospace" fill="#0f172a">{v.v.prim.slice(0, 18)}</text> : <circle cx={196} cy={vpos[i] + RH / 2} r={3.5} fill="#2563eb" />}</g>)}
+      {vars.map((v, i) => ('head' in v || !('ref' in v.v) ? null : arrow(196, vpos[i] + RH / 2, v.v.ref, 'va' + i)))}
+      {heap.map(h => { const p = place.get(h.id)!; return <g key={h.id} data-testid={`obj-${h.id}`}><rect x={p.x} y={p.y} width={RW} height={p.h} rx={4} fill="#fff" stroke="#334155" /><text x={p.x + 8} y={p.y + 16} fontSize="11" fontWeight="700" fill="#475569">{h.label} #{h.id}</text>
+        {h.items.map((it, k) => { const y = p.y + 24 + k * RH; const ch = changed.has(`#${h.id}[${it.k}]`); return <g key={k}><rect x={p.x + 1} y={y} width={RW - 2} height={RH} fill={ch ? '#fde68a' : 'transparent'} /><text x={p.x + 8} y={y + 14} fontSize="12" fill="#64748b">{it.k}</text>{'prim' in it.v ? <text x={p.x + 60} y={y + 14} fontSize="12" fontFamily="monospace" fill="#0f172a">{it.v.prim.slice(0, 16)}</text> : <circle cx={p.x + RW - 10} cy={y + RH / 2} r={3.5} fill="#2563eb" />}</g>; })}</g>; })}
+      {heap.flatMap(h => { const p = place.get(h.id)!; return h.items.map((it, k) => ('ref' in it.v ? arrow(p.x + RW - 10, p.y + 24 + k * RH + RH / 2, (it.v as Extract<Cell, { ref: number }>).ref, `a${h.id}-${k}`) : null)); })}
+    </svg>
+  );
+}
+export function CodeViz() {
+  const ai = useAI(); const [code, setCode] = useState(EXAMPLES[0].code); const [tr, setTr] = useState<Trace | null>(null); const [i, setI] = useState(0); const [play, setPlay] = useState(false); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false);
+  const run = (src = code) => { setPlay(false); const t = trace(src); setTr(t); setI(0); setMsg(t.error ? '' : t.truncated ? 'Stopped after the step limit (possible infinite loop). Showing what ran.' : ''); };
+  useEffect(() => { if (!play || !tr) return; if (i >= tr.steps.length - 1) { const id = setTimeout(() => setPlay(false), 0); return () => clearTimeout(id); } const id = setTimeout(() => setI(x => x + 1), 600); return () => clearTimeout(id); }, [play, i, tr]);
+  const toPy = async () => { setBusy(true); setMsg(''); try { const py = (await ai.gen(cppToPythonPrompt(code))).replace(/^```(?:python)?\n?|```\s*$/g, '').trim(); setCode(py); setMsg('Translated by AI. Read it before trusting the trace: this shows the Python version, not your C++.'); } catch (e) { setMsg((e as Error).message); } setBusy(false); };
+  const step = tr?.steps[i]; const lines = code.split('\n');
+  return (
+    <div className="space-y-3" data-testid="codeviz">
+      <div className={box}><div className="flex gap-2 flex-wrap items-center text-xs"><select onChange={e => { const ex = EXAMPLES[+e.target.value]; if (ex) { setCode(ex.code); setTr(null); } }} className="border rounded px-2 py-1" aria-label="Example" data-testid="cv-example" defaultValue=""><option value="" disabled>Examples…</option>{EXAMPLES.map((x, k) => <option key={x.name} value={k}>{x.name}</option>)}</select><button className={dark} onClick={() => run()} data-testid="cv-run">Trace it</button>
+        <button className={btn} disabled={busy} onClick={() => void toPy()} data-testid="cv-cpp">Paste C++? Translate to Python (AI)</button></div>
+        <div className="text-xs text-slate-600">Runs Python: classes, lists, dicts, loops, recursion. It is a safe built-in interpreter (nothing is sent anywhere). C++ is not executed directly. Not supported: list comprehensions, imports, f-strings.</div>
+        <textarea value={code} onChange={e => { setCode(e.target.value); setTr(null); }} rows={10} spellCheck={false} className="w-full border rounded p-2 font-mono text-xs" aria-label="Code" data-testid="cv-code" /><Msg m={msg} /></div>
+      {tr?.error && <div role="alert" className="border border-red-300 bg-red-50 rounded p-2 text-sm" data-testid="cv-error">Line {tr.error.line}: {tr.error.message}</div>}
+      {tr && step && <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)] gap-3" data-testid="cv-out">
+        <div className={box}><div className="flex gap-2 items-center flex-wrap"><button className={btn} onClick={() => setI(x => Math.max(0, x - 1))} aria-label="Previous step" data-testid="cv-prev">◀</button><button className={btn} onClick={() => setPlay(p => !p)} data-testid="cv-play">{play ? 'Pause' : 'Play'}</button><button className={btn} onClick={() => setI(x => Math.min(tr.steps.length - 1, x + 1))} aria-label="Next step" data-testid="cv-next">▶</button><span className="text-xs" data-testid="cv-count">step {i + 1} / {tr.steps.length}</span></div>
+          <input type="range" min={0} max={tr.steps.length - 1} value={i} onChange={e => setI(+e.target.value)} className="w-full" aria-label="Step" />
+          <div className="font-mono text-xs border rounded overflow-auto max-h-64">{lines.map((l, k) => <div key={k} className={`px-2 whitespace-pre ${k + 1 === step.line ? 'bg-amber-200' : ''}`}><span className="text-slate-400 select-none mr-2">{String(k + 1).padStart(2)}</span>{l}</div>)}</div>
+          <div className="text-xs"><b>{step.note}</b></div>{step.out && <pre className="text-xs bg-slate-900 text-slate-100 rounded p-2 max-h-24 overflow-auto" data-testid="cv-stdout">{step.out}</pre>}</div>
+        <div className={`${box} overflow-auto`}><b>Memory</b> <span className="text-xs text-slate-500">variables on the left · objects on the right · blue arrows are pointers · yellow = just changed</span><Heap step={step} /></div></div>}
+    </div>
+  );
+}
+
+/* ---------------- 6. Swipe flashcards ---------------- */
+export function Swipe() {
+  const [topic, setTopic] = useState(''); const [, force] = useState(0); const [q, setQ] = useState<Card[]>([]); const [log, setLog] = useState<Dir[]>([]); const [text, setText] = useState(''); const [msg, setMsg] = useState(''); const [flip, setFlip] = useState(false);
+  const [drag, setDrag] = useState({ x: 0, y: 0, on: false }); const start = useRef({ x: 0, y: 0 });
+  const topics = deck.topics(); const load = (t = topic) => { setQ(queue(deck, t || null)); setLog([]); setFlip(false); };
+  useEffect(() => { const id = setTimeout(() => load(''), 0); return () => clearTimeout(id); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const card = q[0]; const done = (d: Dir) => { if (!card) return; swipe(deck, card.id, d); setLog(l => [...l, d]); setQ(x => x.slice(1)); setFlip(false); setDrag({ x: 0, y: 0, on: false }); };
+  useEffect(() => { const h = (e: KeyboardEvent) => { if (!card || (e.target as HTMLElement)?.closest('input,textarea,select')) return; if (e.key === 'ArrowRight') done('right'); else if (e.key === 'ArrowLeft') done('left'); else if (e.key === 'ArrowUp') done('up'); else if (e.key === ' ') { e.preventDefault(); setFlip(f => !f); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); });
+  const make = () => { const t = topic || 'My notes'; const n = deck.add(cardsFromText(text, t, 'swipe')); setMsg(n ? `Made ${n} cards in “${t}”.` : 'No new cards found: use sentences like “X is …” or “X = …”.'); setTopic(t); load(t); force(x => x + 1); };
+  const s = summary(log); const hint = drag.x > 40 ? 'right' : drag.x < -40 ? 'left' : '';
+  return (
+    <div className="space-y-3" data-testid="swipe">
+      <div className={box}><div className="flex gap-2 flex-wrap items-center text-xs"><select value={topic} onChange={e => { setTopic(e.target.value); load(e.target.value); }} className="border rounded px-2 py-1" aria-label="Topic" data-testid="sw-topic"><option value="">All due cards</option>{topics.map(t => <option key={t}>{t}</option>)}</select><span data-testid="sw-left">{q.length} to go</span><span className="text-slate-500">Swipe right = remembered · left = forgot (comes back tomorrow 8:00) · up = easy · Space flips</span></div>
+        <details><summary className="cursor-pointer text-xs">Make cards from notes</summary><textarea value={text} onChange={e => setText(e.target.value)} rows={4} className="w-full border rounded p-2 text-sm mt-1" aria-label="Notes to turn into cards" data-testid="sw-text" /><button className={btn} onClick={make} disabled={!text.trim()} data-testid="sw-make">Make cards</button> <Msg m={msg} /></details></div>
+      <div className="flex flex-col items-center gap-3">
+        {card ? <div className="relative w-full max-w-sm h-64 select-none touch-none" data-testid="sw-stack">
+          {q[1] && <div className="absolute inset-0 border rounded-2xl bg-slate-50 scale-95 translate-y-2" aria-hidden />}
+          <div role="group" aria-label={`Flashcard: ${card.front}`} tabIndex={0} data-testid="sw-card" onClick={() => !drag.on && setFlip(f => !f)}
+            onPointerDown={e => { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); start.current = { x: e.clientX, y: e.clientY }; setDrag({ x: 0, y: 0, on: false }); }}
+            onPointerMove={e => { if (e.buttons) setDrag({ x: e.clientX - start.current.x, y: e.clientY - start.current.y, on: Math.abs(e.clientX - start.current.x) > 6 }); }}
+            onPointerUp={() => { const d = decide(drag.x, drag.y); if (d) done(d); else setDrag(x => ({ ...x, x: 0, y: 0, on: false })); }}
+            className={`absolute inset-0 border-2 rounded-2xl bg-white shadow-lg p-5 flex flex-col items-center justify-center text-center cursor-grab ${hint === 'right' ? 'border-emerald-500' : hint === 'left' ? 'border-red-500' : 'border-slate-300'}`}
+            style={{ transform: `translate(${drag.x}px, ${Math.min(0, drag.y) * 0.3}px) rotate(${drag.x / 18}deg)`, transition: drag.on ? 'none' : 'transform .2s' }}>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400 mb-2">{card.topic} · {flip ? 'answer' : 'question'}</div><div className="text-lg font-medium">{flip ? card.back : card.front}</div>
+            {hint && <div className={`absolute top-3 ${hint === 'right' ? 'right-3 text-emerald-600' : 'left-3 text-red-600'} font-bold`} aria-hidden>{hint === 'right' ? 'REMEMBERED' : 'FORGOT'}</div>}</div></div>
+          : <div className="border rounded-2xl p-6 text-center w-full max-w-sm" data-testid="sw-done">{log.length ? <><div className="text-2xl font-bold">{s.pct}%</div><div className="text-sm">{s.remembered} remembered · {s.forgot} to see tomorrow</div></> : <div className="text-sm">No cards due{topic ? ` in ${topic}` : ''}. Make some from your notes above.</div>}<button className={`${btn} mt-3`} onClick={() => load()}>Check again</button></div>}
+        {card && <div className="flex gap-3"><button className="w-14 h-14 rounded-full border-2 border-red-400 text-red-600 text-xl" onClick={() => done('left')} aria-label="Forgot (left)" data-testid="sw-no">✗</button><button className="w-14 h-14 rounded-full border-2 border-amber-400 text-amber-600 text-xl" onClick={() => done('up')} aria-label="Easy (up)" data-testid="sw-easy">★</button><button className="w-14 h-14 rounded-full border-2 border-emerald-400 text-emerald-600 text-xl" onClick={() => done('right')} aria-label="Remembered (right)" data-testid="sw-yes">✓</button></div>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- account (shared by marketplace and bot) ---------------- */
+export function Account({ onSession }: { onSession: (s: Session | null) => void }) {
+  const [s, setS] = useState<Session | null>(() => loadSession()); const [base, setBase] = useState(s?.base ?? ''); const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [name, setName] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const go = async (mode: 'login' | 'register') => { setErr(''); setBusy(true); try { const n = await signIn(base, email, pw, mode, name); saveSession(n); setS(n); onSession(n); setPw(''); } catch (e) { setErr((e as Error).message); } setBusy(false); };
+  if (s) return <div className={box} data-testid="acct-in">Signed in as <b>{s.name}</b> ({s.email}) on {s.base} <button className={btn} onClick={() => { saveSession(null); setS(null); onSession(null); }} data-testid="acct-out">Sign out</button></div>;
+  return <div className={box} data-testid="acct"><b>Connect to a Notes Maker server</b><div className="text-xs text-slate-600">The marketplace and the chat bot need a server (see server-api in the repo). Your notes and flashcards never leave this device unless you publish them.</div>
+    <div className="grid sm:grid-cols-2 gap-2"><input value={base} onChange={e => setBase(e.target.value)} placeholder="https://your-server.example" className="border rounded px-2 py-1" aria-label="Server address" data-testid="acct-base" /><input value={name} onChange={e => setName(e.target.value)} placeholder="Display name (new accounts)" className="border rounded px-2 py-1" aria-label="Display name" /><input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className="border rounded px-2 py-1" aria-label="Email" data-testid="acct-email" /><input value={pw} onChange={e => setPw(e.target.value)} type="password" placeholder="Password (8+ characters)" className="border rounded px-2 py-1" aria-label="Password" data-testid="acct-pw" /></div>
+    <div className="flex gap-2"><button className={dark} disabled={busy} onClick={() => void go('login')} data-testid="acct-login">Sign in</button><button className={btn} disabled={busy} onClick={() => void go('register')} data-testid="acct-register">Create account</button></div><Msg m={err} bad /></div>;
+}
+
+/* ---------------- 7. Notes marketplace ---------------- */
+interface Listing { id: string; title: string; subject: string; board: string; lang: string; price: number; authorName: string; preview: string; created: number; chars: number; sales?: number }
+interface Detail { listing: Listing & { body?: string }; unlocked: boolean; pay?: { upi: string; amount: number; note: string } }
+export function Market({ material, result }: { material: string; result: string }) {
+  const [src, setSrc] = useState<'result' | 'material'>(result ? 'result' : 'material'); const content = src === 'result' ? result : material;
+  const [s, setS] = useState<Session | null>(() => loadSession()); const [list, setList] = useState<Listing[]>([]); const [q, setQ] = useState(''); const [d, setD] = useState<Detail | null>(null); const [utr, setUtr] = useState(''); const [msg, setMsg] = useState(''); const [err, setErr] = useState('');
+  const [mine, setMine] = useState<{ listings: Listing[]; incoming: { id: string; listing: string; buyerName: string; utr: string; amount: number; status: string }[]; bought: { id: string; title: string; status: string; utr: string }[] } | null>(null);
+  const [f, setF] = useState({ title: '', subject: 'Physics', price: 0, upi: '' }); const fail = (e: unknown) => setErr((e as Error).message);
+  const browse = async () => { if (!s) return; try { setList((await call<{ listings: Listing[] }>(s, 'GET', `/market/listings?q=${encodeURIComponent(q)}`)).listings); setErr(''); } catch (e) { fail(e); } };
+  const refreshMine = async () => { if (!s) return; try { setMine(await call(s, 'GET', '/market/mine') as never); } catch (e) { fail(e); } };
+  useEffect(() => { if (s) { const id = setTimeout(() => { void browse(); void refreshMine(); }, 0); return () => clearTimeout(id); } }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
+  const open = async (id: string) => { if (!s) return; try { setD(await call<Detail>(s, 'GET', `/market/listing?id=${id}`)); setUtr(''); setMsg(''); setErr(''); } catch (e) { fail(e); } };
+  const publish = async () => { if (!s) return; setErr(''); setMsg(''); if (content.trim().length < 200) { setErr('Make notes first (Bhasha or Exam tab) or paste at least 200 characters in Study material.'); return; } if (!priceOk(f.price)) { setErr('Price must be free (0) or ₹5 to ₹500.'); return; } if (f.price > 0 && !validVpa(f.upi)) { setErr('Enter your UPI ID, like name@okhdfc.'); return; }
+    try { await call(s, 'POST', '/market/listings', { ...f, body: content }); setMsg('Published.'); void browse(); void refreshMine(); } catch (e) { fail(e); } };
+  const pay = d?.pay; const link = pay ? (() => { try { return upiLink({ pa: pay.upi, pn: d!.listing.authorName, am: pay.amount, tn: d!.listing.title, tr: 'NM' + d!.listing.id }); } catch { return ''; } })() : '';
+  return (
+    <div className="space-y-3" data-testid="market">
+      <Account onSession={x => { setS(x); setList([]); setMine(null); }} />
+      <div className="text-xs border rounded p-2 bg-amber-50">How payment works: you pay the creator directly from your own UPI app (PhonePe, GPay, Paytm…). Notes Maker does not hold or process money and takes no cut. The creator checks their bank and confirms your 12-digit UTR, then the notes unlock. Creators are responsible for what they sell; three reports hide a listing.</div>
+      {s && <>
+        <div className={box}><div className="flex gap-2"><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search notes" className="border rounded px-2 py-1 flex-1" aria-label="Search notes" data-testid="mk-q" /><button className={btn} onClick={() => void browse()} data-testid="mk-search">Search</button></div>
+          {list.length === 0 && <div className="text-xs text-slate-500">No notes yet. Be the first to publish.</div>}
+          {list.map(l => <button key={l.id} onClick={() => void open(l.id)} className="block w-full text-left border rounded p-2 hover:bg-slate-50" data-testid={`mk-item-${l.id}`}><b>{l.title}</b> <span className="text-xs text-slate-500">· {l.subject} · by {l.authorName} · {l.price ? `₹${l.price}` : 'Free'}{l.sales ? ` · ${l.sales} sold` : ''}</span><div className="text-xs text-slate-600 line-clamp-2">{l.preview}</div></button>)}</div>
+        {d && <div className={box} data-testid="mk-detail"><b>{d.listing.title}</b> <span className="text-xs">{d.listing.price ? `₹${d.listing.price}` : 'Free'}</span>
+          {d.unlocked ? <><div className="border rounded p-2 bg-slate-50 max-h-72 overflow-auto whitespace-pre-wrap text-sm" data-testid="mk-body">{d.listing.body}</div><button className={btn} onClick={() => saveFile(`${d.listing.title}.md`, d.listing.body ?? '')}>Download</button></>
+            : <><div className="text-xs">{d.listing.preview}…</div>{pay && <div className="space-y-1"><div className="text-xs">Pay ₹{pay.amount} to <b>{pay.upi}</b></div>{link && <a href={link} className={`${btn} inline-block`} data-testid="mk-upi">Open my UPI app</a>} <span className="text-xs text-slate-500">(on a computer, send it from your phone to {pay.upi})</span>
+              <div className="flex gap-2"><input value={utr} onChange={e => setUtr(e.target.value)} placeholder="12-digit UTR after paying" className="border rounded px-2 py-1" aria-label="UPI reference number" data-testid="mk-utr" /><button className={dark} onClick={async () => { if (!validUtr(utr)) { setErr('A UTR is 12 digits, shown in your UPI app after payment.'); return; } try { await call(s, 'POST', '/market/purchase', { id: d.listing.id, utr: utr.trim() }); setMsg('Sent. The creator will confirm after checking their account.'); setErr(''); void refreshMine(); } catch (e) { fail(e); } }} data-testid="mk-buy">I have paid</button></div></div>}</>}
+          <button className={btn} onClick={async () => { try { await call(s, 'POST', '/market/report', { id: d.listing.id }); setMsg('Reported. Thank you.'); } catch (e) { fail(e); } }}>Report</button></div>}
+        <div className={box} data-testid="mk-publish"><b>Publish your notes</b><div className="text-xs text-slate-600">What to publish: <select value={src} onChange={e => setSrc(e.target.value as 'result' | 'material')} className="border rounded px-1 py-0.5" aria-label="What to publish" data-testid="mk-src"><option value="result">The notes I just made (Bhasha / Exam tab)</option><option value="material">The text in Study material</option></select> · {content.length.toLocaleString()} characters ready.</div>
+          <div className="grid sm:grid-cols-4 gap-2"><input value={f.title} onChange={e => setF({ ...f, title: e.target.value })} placeholder="Title" className="border rounded px-2 py-1 sm:col-span-2" aria-label="Title" data-testid="mk-title" /><input value={f.subject} onChange={e => setF({ ...f, subject: e.target.value })} placeholder="Subject" className="border rounded px-2 py-1" aria-label="Subject" /><input type="number" min={0} max={500} value={f.price} onChange={e => setF({ ...f, price: Math.round(+e.target.value) })} className="border rounded px-2 py-1" aria-label="Price in rupees, 0 for free" data-testid="mk-price" /></div>
+          {f.price > 0 && <input value={f.upi} onChange={e => setF({ ...f, upi: e.target.value })} placeholder="Your UPI ID to receive money (name@bank)" className="border rounded px-2 py-1 w-full" aria-label="Your UPI ID" data-testid="mk-upi-id" />}
+          <button className={dark} onClick={() => void publish()} data-testid="mk-pub">Publish</button></div>
+        {mine && (mine.incoming.length > 0 || mine.bought.length > 0) && <div className={box} data-testid="mk-mine"><b>Sales and purchases</b>{mine.incoming.map(p => <div key={p.id} className="flex gap-2 items-center text-xs border rounded p-2"><span>{p.buyerName} paid ₹{p.amount}, UTR {p.utr} — {p.status}</span>{p.status === 'pending' && <><button className={btn} onClick={async () => { await call(s, 'POST', '/market/confirm', { purchase: p.id }).catch(fail); void refreshMine(); }} data-testid={`mk-ok-${p.id}`}>Money received</button><button className={btn} onClick={async () => { await call(s, 'POST', '/market/confirm', { purchase: p.id, accept: false }).catch(fail); void refreshMine(); }}>Not received</button></>}</div>)}{mine.bought.map(p => <div key={p.id} className="text-xs">Bought “{p.title}”: {p.status}</div>)}</div>}
+      </>}
+      <Msg m={msg} /><Msg m={err} bad />
+    </div>
+  );
+}
+
+/* ---------------- 8. WhatsApp / Telegram bot ---------------- */
+export function BotTab() {
+  const [s, setS] = useState<Session | null>(() => loadSession()); const [code, setCode] = useState(''); const [msg, setMsg] = useState(''); const [err, setErr] = useState(''); const [saved, setSaved] = useState(savedItems());
+  const check = async () => { if (!s) return; setErr(''); try { const r = await pullInbox(s, t => addTask(t), listTasks()); setSaved(savedItems()); setMsg(r.tasks || r.saved ? `Pulled ${r.tasks} task(s) into your planner and ${r.saved} item(s) below.` : 'Nothing new.'); } catch (e) { setErr((e as Error).message); } };
+  const auto = useRef(check); useEffect(() => { auto.current = check; });
+  useEffect(() => { if (!s) return; const first = setTimeout(() => void auto.current(), 0); const t = setInterval(() => void auto.current(), 60000); return () => { clearTimeout(first); clearInterval(t); }; }, [s]);
+  const yt = (u: string) => /youtu/.test(u);
+  return (
+    <div className="space-y-3" data-testid="bot">
+      <Account onSession={x => { setS(x); setCode(''); }} />
+      <div className={box}><b>Study from your chat apps</b><div className="text-xs text-slate-600">Forward a YouTube link, send “remind me to revise ROS 2 commands tomorrow”, or a voice note to the bot. Reminders land in your Planner; links and notes land here. The bot only sees what you send it.</div>
+        <ol className="list-decimal ml-5 text-xs space-y-1"><li>Run the bot (see <code>server-api/README.md</code>): Telegram works with a free bot token; WhatsApp needs a Meta Business account.</li><li>Press “Get link code”, then send <code>/link CODE</code> to the bot.</li></ol>
+        <div className="flex gap-2 items-center flex-wrap"><button className={dark} disabled={!s} onClick={async () => { try { setCode((await call<{ code: string }>(s!, 'POST', '/bot/link', {})).code); setErr(''); } catch (e) { setErr((e as Error).message); } }} data-testid="bot-code">Get link code</button>{code && <code className="px-2 py-1 bg-slate-100 rounded" data-testid="bot-code-out">/link {code}</code>}{code && <span className="text-xs text-slate-500">valid 10 minutes</span>}
+          <button className={btn} disabled={!s} onClick={() => void check()} data-testid="bot-check">Check inbox now</button></div><Msg m={msg} /><Msg m={err} bad /></div>
+      {saved.length > 0 && <div className={box} data-testid="bot-saved"><b>Saved from chat</b>{saved.slice().reverse().map(it => <div key={it.id} className="text-xs border rounded p-2 flex gap-2 items-center flex-wrap"><span className="px-1.5 rounded bg-slate-100">{it.kind} · {it.source}</span><span className="flex-1">{it.title}{it.url && <> — <a href={it.url} target="_blank" rel="noreferrer noopener" className="underline">{it.url.slice(0, 50)}</a></>}</span>{yt(it.url) && <button className={btn} onClick={() => { void navigator.clipboard?.writeText(it.url); window.dispatchEvent(new CustomEvent('nm:go', { detail: 'lecture' })); }} data-testid="bot-lecture">Copy link &amp; open Lecture to Notes</button>}</div>)}</div>}
+    </div>
+  );
+}

@@ -15,6 +15,8 @@ export const ROADMAP: RoadItem[] = [
   { when: 'Shipped', title: 'Predict-run-explain simulation tutoring, mock exams, photo and typed solution checking, lab-report coach', status: 'live' },
   { when: 'Shipped', title: 'Course packs, class dashboard, pilot kit, study rooms, plugin system, encrypted backup', status: 'live' },
   { when: 'Shipped', title: 'Desktop app (Windows, macOS, Linux) and offline installers', status: 'live', note: 'unsigned builds; not yet tested on real machines by the maker' },
+  { when: 'Shipped', title: 'Study Studio: Indian-language notes, exam-board engines, handwriting to LaTeX, voice interruption, code/pointer visualizer, swipe recall', status: 'live', note: 'AI steps need your own key; verified here only against fake models' },
+  { when: 'Shipped', title: 'Notes marketplace (UPI direct, manual confirmation) and Telegram/WhatsApp inbox bot', status: 'partial', note: 'server + tests exist; no real payments, bot not yet run against real Telegram/WhatsApp' },
   { when: 'Next', title: 'Run a 4–6 week pilot with 2–3 institutions and publish the before/after numbers', status: 'planned' },
   { when: 'Next', title: 'Accounts and a hosted API (reference server included in this repository)', status: 'partial', note: 'reference server built and tested locally; not deployed' },
   { when: 'Next', title: 'Real payments (Razorpay / Stripe) and subscription management', status: 'planned' },
