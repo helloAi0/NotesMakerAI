@@ -1,130 +1,202 @@
+<div align="center">
+
+<img src="docs/demo.gif" alt="Notes Maker AI: product walkthrough" width="100%" />
+
 # Notes Maker AI
 
+**An offline-first AI study workspace built for Indian students.**
+Notes that read themselves aloud · 200+ interactive STEM simulations · one multi-agent assistant (FRIDAY) · study tools in six languages · your data stays on your device.
+
 [![CI](https://github.com/helloAi0/NotesMakerAI/actions/workflows/ci.yml/badge.svg)](https://github.com/helloAi0/NotesMakerAI/actions/workflows/ci.yml)
+![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)
+![Three.js](https://img.shields.io/badge/three.js-landing-000000?logo=threedotjs&logoColor=white)
+![Node](https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-private%20beta-orange)
 
-Digital notebook with voice (dictation, equation dictation, read-aloud from any sentence), AI notes, a PDF library and a
-Visuals Studio with 100+ interactive STEM simulations (Class 8 to postgraduate) and an honest curriculum-coverage view.
+[Quick start](#-quick-start) · [Features](#-features) · [Architecture](#-architecture) · [Deploy](#-deploy-on-render) · [Testing](#-testing) · [Security](#-security-and-privacy) · [Roadmap](#-roadmap-and-honest-limits)
 
-## Run it (Windows PowerShell, macOS, Linux)
-```
-cd frontend
-npm install
-npm run dev
-```
-Open the address it prints (usually http://localhost:5173). The microphone only works on `localhost` or HTTPS; use Chrome or Edge for dictation.
-Add your own AI key inside the app's settings. Never commit keys.
+</div>
 
-## Deploy (Render + Vite)
-1. Push the repo to GitHub, then on Render: **New + > Blueprint** and pick it. `render.yaml` creates the static web app (`frontend`, built by Vite) and the accounts/marketplace server (`server-api`, `/healthz` health check).
-2. After the first deploy set `NM_ORIGIN` on the server to the web app URL and `VITE_API_BASE` on the web app to the server URL (then redeploy the web app). `NM_SECRET` and `NM_BOT_KEY` are generated for you.
-3. Optional: add `RZP_*` keys for online payments (webhook URL `https://<server>/webhooks/razorpay`, event `payment_link.paid`), and run the bot with `node bot.mjs --check` first.
-4. The web app works fully without the server. Note that Render's free tier has no persistent disk, so the server's accounts reset on redeploy: use the paid disk in `render.yaml` for real users. Env variables are listed in `.env.example`.
-5. First-time visitors see a 3D landing page (three.js, loaded only then). Reopen it with the sparkle button in the header or `#welcome`.
+---
 
-## Checks
-| Command | What it does |
+## Why this exists
+
+Most study apps assume fast internet, English-first content and a paid AI subscription. Notes Maker AI starts from the opposite assumptions: **it works offline, it speaks the student's language, and it never needs an account to start.** AI is optional and bring-your-own-key, so a student with no key still gets a fully working notebook, planner, simulations, flashcards and a built-in knowledge assistant.
+
+> **Honest positioning.** FRIDAY is a set of coordinated AI helpers (router, planner, retrieval, tools), **not AGI**. It can be wrong; check important answers against your textbook.
+
+## ✨ Features
+
+| Area | What you get |
 |---|---|
-| `npm run typecheck` | TypeScript, no emit |
-| `npm run smoke -- <sims-file>` | numeric smoke test of one sims file, e.g. `npm run smoke -- ug_mech` |
-| `npm run fuzz` | all simulations x extreme/random sliders, tiny to huge canvases, bad pointer input |
-| `npm run build` | production build (screens are code-split) |
-| `npm run check` | typecheck + fuzz + build |
-| `npm run test:e2e` | browser tests (start `npm run dev -- --port 5199` first, run `npx playwright install chromium` once; set `BASE=http://localhost:PORT` for another port) |
+| **Notebook** | Rich notes, folders, Draw tab with offline handwriting recognition, dictation with spoken formatting ("new line", "bullet"), **click any word to be read aloud from there**. |
+| **FRIDAY assistant** (Alt+A) | Operates the app from typed or spoken commands chained with `->`; answers from a STEM glossary, all simulations, your notes and PDFs (BM25 retrieval with sources); calculator; plugs into Gemini, OpenAI, Anthropic, OpenRouter, or a local Ollama model. Multi-agent mode with planner, retriever, tutor and critic. |
+| **Visuals Studio** | **200+ interactive simulations**, Class 8 to postgraduate, with a curriculum-coverage view and prediction mode. |
+| **Lecture to Notes** | Turn a recording, transcript or YouTube lecture into structured notes. |
+| **Study Studio** (8 tools) | Bhasha language flip · JEE/NEET/UPSC/GATE engines · Handwriting→LaTeX · Voice tutor you can interrupt · Python code visualizer · Tinder-style swipe recall · Notes marketplace · Telegram/WhatsApp bot. |
+| **Practice & progress** | Quizzes, spaced repetition, streaks, study planner, dashboard. |
+| **Study rooms** | Peer-to-peer (WebRTC) rooms, no media server. |
+| **Platform** | Class and teacher tools, analytics, PWA install, full offline cache, desktop app (Electron). |
+| **3D landing page** | three.js scene loaded only for first-time visitors, with reduced-motion and no-WebGL fallbacks. |
 
-Adding a simulation: see `frontend/tools/SIM_AUTHORING.md`. Export `defineSim({...})` from a new file in `src/sims/`; it is registered automatically.
+### Study Studio in detail
 
-## Click-to-speak, dictation and handwriting (all offline)
-- **Click any word** in the notes (Read mode; typed, dictated or AI-generated) and reading starts at exactly that word; **highlight** text to read from the highlighted start. Clicking beside, below or between words does nothing, and the typing box never speaks. Toggle: *Voice → Click-to-speak*.
-- **Handwriting:** Draw tab → *Recognise handwriting* (local tesseract.js engine, files copied to `frontend/public/ocr` by `npm install`/`npm run dev`). Then in Read mode click any handwritten word to hear from there, or *To typed text*. Accuracy is best for neat print-style letters; cursive is unreliable.
-- **Dictation** streams words into the editor live and applies spoken formatting ("new line", "bullet", "heading …", "full stop").
+| Tool | Highlights |
+|---|---|
+| **Bhasha** | Flips notes into Hindi, Marathi, Bengali, Tamil or Telugu while **protecting formulas and technical terms**; chunking, retry, safe fallback to the English original. |
+| **Exam engines** | Board-aware notes and memory tricks; paste your own previous-year questions to find recurring patterns (nothing is bundled). |
+| **Handwriting → LaTeX** | Photo of maths → editable, KaTeX-checked LaTeX and a dependency graph. |
+| **Voice tutor** | Say "wait", "explain again", "give an example", "slower" mid-sentence in English, Hindi, Marathi, Bengali, Tamil or Telugu. |
+| **Code visualizer** | Safe built-in Python interpreter: exact big integers, Python-style floats, classes, sets, try/except, comprehensions, `math`/`collections`/`heapq`; step-through with variables, heap and call stack. |
+| **Swipe recall** | Left = see it again tomorrow, right = push it out; undo; spaced scheduling. |
+| **Notes marketplace** | Creators sell notes; buyers pay by UPI link or online (Razorpay); notes unlock only after confirmed payment. |
+| **Chat bot** | Send a link, voice note or "remind me…" to Telegram or WhatsApp; it lands in your planner. |
 
-## FRIDAY: the built-in assistant and agent
+## 🏗 Architecture
 
-FRIDAY lives in the round button (Alt+A) on every screen and as a full chat page ("FRIDAY Assistant" in the sidebar). It has two jobs, both offline:
-
-* **Agent**: it operates the app from typed or spoken commands, chained with `->`, "then" or "and". Examples:
-  `Open AI segmentation -> go to the image processing module -> set model to U-Net -> run simulation`,
-  `write a note about Fourier series`, `summarize my pdf thermodynamics`, `create folder Physics`,
-  `move thermodynamics to folder Physics`, `import folder` (opens the file chooser), `add task revise optics by Friday`,
-  `what is due this week`, `mark revise optics done`, `add the summary to my notebook`, `open settings`.
-* **Study helper**: ask any study question or "how do I ... in this app". Answers come from a built-in STEM glossary, the app guide, all simulations, your notes and your PDFs (BM25 retrieval, sources shown). It also has a calculator (`12*7+sqrt(2)`). Add an AI key in Settings (Gemini, OpenAI, Anthropic, OpenRouter or a custom/Ollama endpoint) and it answers anything with a language model, grounded in your material; without a key it says honestly when something is outside its built-in knowledge.
-
-Other screens: Dashboard (streak, activity, tasks), Study Planner, AI Note Generator (offline from built-in knowledge, or AI), global search (Ctrl+K), Settings (AI key, backup/restore), PWA install and a full offline cache.
-
-Tests: `npx tsx tools/friday.mts`, `npx tsx tools/intents.mts`, and with `npx vite preview --port 5300` running: `BASE=http://127.0.0.1:5300 node tools/e2e_friday.mjs` (needs sample PDFs in `PDFDIR`, default `/tmp/pdfs`).
-
-## Voice matrix, FRIDAY tracks and new simulations
-- **Click-to-speak** reads only when you click directly on a word in Read mode; the typing box never speaks.
-- **Edit pane** has a Dictate mic, a Read Page button and the Voice Modulation Matrix (English, Hindi, Arabic, Marathi, French, German; male/female; deep or melodic).
-- **FRIDAY** is the single assistant (no separate bots). It chats, explains and derives maths/science, writes code, operates the app and a virtual file system, remembers facts about you, and learns answer styles from your 👍/👎. See "FRIDAY" below.
-- **Play** auto-sweeps one parameter on static simulations so something always moves.
-- New sims: Black–Scholes + Greeks, bullwhip, Nash equilibrium, DNA alignment, particle-filter localisation with LiDAR, planar quadcopter, 6-DOF arm FK/IK, Red-Black tree, Q-learning, Raft, ZK 3-colouring demo, traffic anomaly detector, CMOS inverter, Carnot cycle, NMR/IR, Ising, N-body, lattice-Boltzmann flow.
-- Tests: `npx tsx tools/{intents,fmt,friday,logic_cs,logic_sci,fuzz}.mts`, then e2e scripts against `vite preview`.
-
-## FRIDAY (one assistant)
-Open it from the sidebar or the floating button (Alt+A). Tabs: **Chat · Files · Memory · Learning · Map · Brain**.
-
-- **Brain order:** local model (Ollama / vLLM / LM Studio / llama.cpp on your computer) → cloud API key from Settings → built-in offline engine (STEM knowledge + your notes/PDFs, says so when it does not know). The ONLINE/OFFLINE switch in the header controls cloud and Wikipedia use. Wikipedia recall is off unless you say "search the web …" or enable it in Brain.
-- **Local model setup (works with no internet):**
-  `ollama pull llama3.1` then `OLLAMA_ORIGINS=* ollama serve` (vLLM: `vllm serve <model> --allowed-origins '["*"]'`). In the app: FRIDAY → Brain → *Find local model*.
-- **Jarvis actions:** e.g. "Friday, go to folder Inbox, capture the document there, move it into the PDF processing section, and generate a summary report". FRIDAY writes a JSON plan (viewable), runs it step by step with live status on the virtual file system (IndexedDB; folders /Documents /Inbox /PDF Processing /Reports /Captures /Notes /Trash; your PDF library is mounted at /PDF Library) and stops honestly at the first failing step. Deleting moves files to /Trash.
-- **Voice:** mic button streams speech into FRIDAY (English, Hindi, Arabic, Marathi, French, German selectable), spoken replies, hands-free conversation mode. The notebook toolbar has dictation into the text cursor and Read mode click-to-read from any word.
-- **Learning (reinforcement):** a softmax policy per question type chooses the answer style (concise, step-by-step, worked example, formal, analogy). 👍, 👎 (+reason), regenerate and copy are rewards; REINFORCE with a baseline updates it. Facts you tell it are stored in Memory (this browser only).
-- **Clustering:** your notes, PDFs, files, sims and past questions are embedded (TF-IDF), grouped by spherical k-means (k by silhouette) and projected with PCA in the Map tab; the nearest cluster focuses answers.
-- **Honest scope:** this is not true AGI. It is a language model (yours, local or cloud) plus tools, memory, a learned answer style and a critic. Without a connected model, open-ended conversation is limited to the offline engine.
-
-## Commands
-```
-cd frontend && npm install
-npm run dev                    # development
-npm run build && npx vite preview --port 5300 --host 127.0.0.1
-npx tsc --noEmit -p tsconfig.app.json && npm run lint
-npm run test:unit              # logic, FRIDAY plan/VFS/memory/RL/clustering
-BASE=http://127.0.0.1:5300 npm run test:e2e   # needs the preview server above and Playwright
-npx tsx tools/fuzz.mts         # every simulation x parameter combinations
+```mermaid
+flowchart LR
+  subgraph Browser["Browser / PWA / Electron (offline-first)"]
+    UI["React 19 + Vite UI<br/>code-split views"]
+    KV[("Local KV store<br/>notes, PDFs, progress")]
+    SW["Service worker<br/>offline cache"]
+    FR["FRIDAY: router · planner<br/>retriever · tools"]
+    UI --- KV
+    UI --- FR
+    UI --- SW
+  end
+  FR -- "your key, your choice" --> LLM["Gemini / OpenAI / Anthropic<br/>OpenRouter / Ollama"]
+  UI -- "optional account features" --> API
+  subgraph Server["server-api (zero-dependency Node)"]
+    API["Accounts · marketplace<br/>planner inbox"]
+    BOT["Telegram + WhatsApp bot<br/>(in-process)"]
+    DB[("SQLite or JSON")]
+    API --- DB
+    BOT --- API
+  end
+  RZP["Razorpay"] -- "signed webhook" --> API
+  TG["Telegram / Meta"] <--> BOT
+  MAIL["Resend (email)"] <-- "verify / reset" --> API
 ```
 
-## Lecture to Notes (Phase 9)
+**Design principles**
 
-Sidebar → **Lecture to Notes**. Paste a YouTube link and the lecture transcript (YouTube ⋯ → Show transcript → copy, or load an `.srt`/`.vtt`/`.txt` file). The app keeps timestamps, splits the lecture into topic sections (lexical cohesion), and writes a summary, key points, formulas (written or spoken, e.g. "delta U equals Q minus W" → `ΔU = Q − W`), definitions and key terms. Clicking a timestamp seeks the embedded player; the active section follows the video. Save to Notebook, copy, download `.md`, or *Improve with AI* (your own key). All analysis runs on the device; only the video embed needs internet. Browsers cannot fetch YouTube transcripts directly (CORS), so the transcript is pasted or loaded from a file.
+1. **Offline first.** Everything core works with no network and no account; the server is optional.
+2. **Local data.** Notes, PDFs and progress stay on the device. AI keys live only in the browser and go only to the provider the user chose.
+3. **Small first load.** Heavy libraries (three.js, KaTeX, PDF, OCR, simulations) are lazy chunks under a CI-enforced budget (~410 KB gzip initial).
+4. **Zero-dependency server.** `server-api` uses only Node built-ins: tiny attack surface, trivial to audit and deploy.
+5. **Honest AI.** Retrieval shows sources; failure states say what went wrong; nothing pretends to be AGI.
 
-## Study Studio (eight tools for Indian students)
-Open **Study Studio** in the sidebar.
-1. **Bhasha**: upload a PDF or paste text, get notes (or a faithful translation) in Hindi, Marathi, Bengali, Tamil or Telugu. Technical terms, formulas and units are masked before the model sees them and restored after, and the app reports how many were kept. Listen with your device's voice. Buttons switch language; the rest of the app UI is English.
-2. **Exam engines**: CBSE (step marking), JEE Main/Advanced, NEET, UPSC, GATE note styles and practice questions. No past papers are bundled: paste your own previous-year questions and it finds repeating topics and question types in that sample.
-3. **Handwriting → LaTeX**: photo of a notebook page → LaTeX (checked with KaTeX, editable) and clickable flowcharts/circuit-style diagrams. Needs a vision-capable model.
-4. **Voice tutor**: narrates notes; press the mic (or type) “Wait, explain that enthalpy part again with an easier example” and that part is rewritten and spoken. Also: pause, continue, next, back, slower, faster, stop.
-5. **Code visualizer**: Python (classes, lists, dicts, loops, recursion) in a safe built-in interpreter with a step-by-step memory/pointer view. C++ is translated to Python by AI first (review it).
-6. **Swipe recall**: swipe/drag/arrow keys; forgotten cards return tomorrow 8:00.
-7. **Notes marketplace** and 8. **Chat bot**: need the server in `server-api/` (see its README). UPI payments are direct creator-to-buyer with manual confirmation; no real payment processing.
+### Repository layout
 
-Tests: `npm run test:unit`, `npm run test:e2e` (includes `e2e_studio.mjs`, which runs the real server), `npm run test:server`.
+```
+frontend/      React 19 · Vite 8 · TypeScript 6 · Tailwind 3 (the web app, PWA)
+  src/sims/    200+ simulations, auto-registered via defineSim()
+  src/lib/     FRIDAY, voice, OCR, i18n, study tools, platform
+  tools/       unit tests (tsx), Playwright e2e suites, fuzzers, perf budget
+server-api/    Accounts, marketplace, payments webhook, bot, SQLite store (Node ≥22)
+desktop/       Electron wrapper (Windows, macOS, Linux)
+ai-service/    Optional FastAPI service
+backend-cpp/   Optional C++ backend experiments
+docs/          Demo GIF and the detailed feature guide (docs/GUIDE.md)
+render.yaml    One-click Render Blueprint
+```
 
-### Second round (code visualizer, payments, languages)
-- **Code visualizer** rewritten: exact big integers, Python-style floats (`5.0`), sets, try/except/finally/raise/assert, custom exceptions with inheritance and `super()`, imports of `math`, `random` (seeded, deterministic), `collections`, `heapq`, `sys`, slices with steps, set/dict comprehensions. Still unsupported (clear error): `with`, `yield`, decorators, `*args/**kwargs`.
-- **Payments:** optional Razorpay mode (see `server-api/README.md`). Verified only against a fake gateway.
-- **Bot:** `node bot.mjs --check` health check. Real Telegram/WhatsApp delivery is still untested here.
-- **App language:** header dropdown (English, Hindi, Marathi, Bengali, Tamil, Telugu) translates the menu, header, start banner and Study Studio headings. Lessons, simulations and most tool panels stay English. Translations are drafts without native-speaker review.
-- **Voice interruptions** understand Hindi, Marathi, Bengali, Tamil and Telugu command words (draft lists, not reviewed by native speakers) and the mic listens in the language chosen in the Voice tab.
-- `tools/e2e_sweep.mjs` visits every view, Studio tab and language at desktop and phone width and fails on any console error, failed request or overflow.
+## 🚀 Quick start
 
-### Final hardening pass
-- **Auth/security:** password change and "sign out other devices" (tokens carry a version that is revoked), `/healthz`, security headers on every API response, `NM_TRUST_PROXY` so rate limits work behind Render, strict CSP on the web app (`script-src` needs `'unsafe-eval'` only because FRIDAY's code sandbox runs your own snippets in a throwaway Worker). See `SECURITY.md` for the honest list of what is still missing (email verification/reset, external pen test, real database).
-- **3D landing page** (`components/Landing.tsx`, three.js in a lazy chunk): reduced-motion still frame, no-WebGL fallback, Escape/Skip, shown once to real first-time visitors (automated browsers skip it; open with `#welcome`).
-- **Tests added:** `e2e_landing`, `e2e_sweep` (every view/tab/language), `e2e_monkey` (clicks every button: 271 clicks, clean), plus server `security.test.mjs`, `gateway.test.mjs`.
-- Deployment: `render.yaml`, `.env.example`, `CONTRIBUTING.md`; CI now also runs the new server tests.
+Requirements: **Node 22+** (Node 20 works for everything except SQLite storage).
 
-### Third round (bot, language, accounts, storage)
-- **Bot fixed:** the program-entry check (`file://${argv[1]}`) silently did nothing on Windows or paths with spaces, and nothing ever ran the bot on Render. It now runs **inside the main server** when `TELEGRAM_TOKEN`/`WA_*` are set, Telegram polling clears blocking webhooks, backs off, stops on a revoked token, WhatsApp send errors are logged, WhatsApp webhook is `/webhooks/whatsapp`. `bot.e2e.test.mjs` runs real server + real bot against fake Telegram/Meta servers. The Bot tab shows which transports run.
-- **Language:** picking a language now translates the whole app: menus from a dictionary, everything else by your own AI model (cloud key or local Ollama), cached on the device (`lib/domTranslate.ts`). User notes, inputs, code and chat answers are never touched. Needs an AI key for the long tail; machine translation, not reviewed by native speakers.
-- **Accounts:** email verification + password reset (Resend, or any injected mailer; links are single-use and die when the password changes), marketplace gated on verified email when mail is on. **Storage:** `NM_DATA=data.sqlite` uses SQLite (built into Node 22.5+) with transactions and WAL, importing an existing JSON file.
+```bash
+git clone https://github.com/helloAi0/NotesMakerAI.git
+cd NotesMakerAI/frontend
+npm install
+npm run dev          # http://localhost:5173
+```
 
-### Audit notes (what was found and fixed after the first release of Study Studio)
-- **Bhasha:** model output with Indic digits in term markers (⟦१⟧) was not restored; place and person names were frozen in English; whitespace around protected terms was lost; huge PDFs were sent in full (now capped at 30,000 characters with a visible notice); added Stop; scanned PDFs get an explanation; speech reads sentence by sentence (long text cut off before) and stops when you leave the tab.
-- **Exam engines:** unusable AI replies now show an error instead of an empty list.
-- **Handwriting:** `null`/array replies crashed the parser; slow photos could overwrite a newer scan; HEIC photos get a clear message.
-- **Voice:** a late end-of-speech event could skip sentences; word matching broke Hindi (combining vowel signs); markdown symbols were read aloud; a second request while thinking was interleaved; added a few Hindi commands.
-- **Code visualizer:** added f-strings, list comprehensions, keyword arguments, `global`, `any/all`, `key=`/`reverse=`; `+=` on lists now mutates in place like Python; large lists are capped per step; parser could crash on malformed code (found by fuzzing 30,000 mutated programs; now 0 crashes); the final step points at the failing line; Play restarts at the end.
-- **Swipe:** added Undo.
-- **Marketplace:** rights confirmation required; purchase status (pending/rejected) shown; reports need a 24-hour-old account and are rate-limited (stops brand-new accounts from mass-reporting a rival); expired sign-in is handled.
-- **Bot:** group chats are refused (anyone in a group could otherwise write to a linked user's inbox); code guessing is throttled per chat; Unlink and link status; WhatsApp webhook server included; the planner syncs in the background (every 5 minutes and on focus) once signed in.
+* Microphone features need `localhost` or HTTPS; use Chrome or Edge for dictation.
+* Add an AI key **inside the app** (Settings). Never commit keys.
+* After pulling new code, `npm run dev` installs any newly added packages automatically.
+
+### Optional: run the accounts / marketplace / bot server
+
+```bash
+cd server-api
+NM_SECRET=$(openssl rand -hex 32) NM_ORIGIN=http://localhost:5173 node server.mjs   # :8787
+```
+
+Copy [`.env.example`](.env.example) for every setting. Key ones:
+
+| Variable | Purpose |
+|---|---|
+| `NM_SECRET` | Signs sessions (32+ chars, required) |
+| `NM_ORIGIN` / `NM_APP_URL` | Allowed web origin / base URL used in emails |
+| `NM_DATA` | `./data.json` (simple) or `./data.sqlite` (durable, transactional) |
+| `NM_BOT_KEY` + `TELEGRAM_TOKEN` | Runs the Telegram bot inside the server |
+| `WA_TOKEN`, `WA_PHONE_ID`, `WA_APP_SECRET`, `WA_VERIFY_TOKEN` | WhatsApp Cloud API (webhook: `/webhooks/whatsapp`) |
+| `RZP_KEY_ID`, `RZP_KEY_SECRET`, `RZP_WEBHOOK_SECRET` | Razorpay online payments (webhook: `/webhooks/razorpay`) |
+| `RESEND_API_KEY`, `NM_MAIL_FROM` | Email verification and password reset |
+
+Run `node bot.mjs --check` to verify your Telegram/WhatsApp/server setup in seconds without sending any message.
+
+## ☁️ Deploy on Render
+
+1. Push to GitHub, then **Render → New + → Blueprint** and select this repo. [`render.yaml`](render.yaml) creates:
+   * `notes-maker-web`: static site built by Vite, with security headers, strict CSP and SPA rewrite.
+   * `notes-maker-server`: Node service with `/healthz`, a persistent disk and SQLite.
+2. Set `NM_ORIGIN`/`NM_APP_URL` (web URL) on the server and `VITE_API_BASE` (server URL) on the web app, then redeploy the web app.
+3. Optionally add Telegram, WhatsApp, Razorpay and Resend keys (all `sync: false`, entered only in the Render dashboard).
+4. The Render **free** tier has no persistent disk, so accounts reset on redeploy; use the paid disk for real users.
+
+## 🧪 Testing
+
+| Layer | Command | Covers |
+|---|---|---|
+| Types / lint | `npx tsc -b` · `npx eslint src server --quiet` | Strict TS (`verbatimModuleSyntax`, `erasableSyntaxOnly`) |
+| Unit | `npm run test:unit` | Intents, FRIDAY, interpreters, i18n, Bhasha, OCR parsing, swipe scheduler, fuzzing (30,000 mutated programs) |
+| Server | `npm run test:server` | 27 tests: auth, marketplace, Razorpay signature/replay, email flows, SQLite, **bot end-to-end against fake Telegram/Meta servers** |
+| Browser e2e | `BASE=http://127.0.0.1:5300 npm run test:e2e` | 30 Playwright suites: every view, every Study Studio tab, every language, two-browser WebRTC, a monkey test that clicks every button, mobile layout, touch reading |
+| Simulations | `npm run fuzz` | All simulations × extreme sliders, tiny to huge canvases, hostile pointer input |
+| Performance | `node tools/budget.mjs` | Fails CI if the first-load bundle exceeds budget |
+
+CI runs on every push ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). Contribution workflow: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## 🔐 Security and privacy
+
+* **Local by default:** notes, PDFs and progress never leave the device unless the user publishes or syncs.
+* **Keys:** AI keys stay in the browser and go only to the chosen provider, never to this server.
+* **Auth:** scrypt-hashed passwords with per-user salts, HMAC-signed sessions with server-side revocation (password change signs out other devices), rate limiting on sign-in/sign-up/reset, email verification and single-use reset links.
+* **Payments:** Razorpay webhooks are verified by HMAC over the raw body, amounts are re-checked, each payment is processed once; card/UPI details never touch this server.
+* **Web hardening:** strict Content-Security-Policy, `X-Frame-Options: DENY`, `nosniff`, referrer and permissions policies; API sends HSTS and `no-store`.
+* **Bot:** private chats only, linking codes throttled, constant-time key comparison, webhook signatures verified.
+
+Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+
+## 🗺 Roadmap and honest limits
+
+**Status: private beta.** It is deployable today, but it is not yet advertised as ready for the general public.
+
+Verified in CI and in this repo's tests: everything above against fakes and real local services. **Not yet verified against live third-party services** (needs your accounts): Telegram, WhatsApp Cloud API, Razorpay, Resend, UPI, Gemini/Ollama/Whisper in production, GPUs, real phones, and the Windows/macOS installers.
+
+| Next | Why |
+|---|---|
+| Run one real payment and one real message per bot | Confirm third-party integrations end to end |
+| Legal pages (privacy policy, terms, refund/takedown policy, DPDP compliance) | Required before collecting emails or payments publicly |
+| Independent security review, audit log, backups, monitoring | Production hygiene |
+| Native-speaker review of Hindi/Marathi/Bengali/Tamil/Telugu text | Translations are machine-assisted drafts |
+| Creator payouts (Razorpay Route + KYC), moderation/admin panel | Marketplace operations are manual today |
+| Postgres + multi-instance server | Current SQLite store targets a single instance |
+| Hosted AI option | Today every user brings their own key |
+
+## 📚 More documentation
+
+* [`docs/GUIDE.md`](docs/GUIDE.md): the detailed feature guide, FRIDAY commands, voice matrix, audit notes and per-feature test commands.
+* [`server-api/README.md`](server-api/README.md): API routes, payments, bot setup.
+* [`frontend/tools/SIM_AUTHORING.md`](frontend/tools/SIM_AUTHORING.md): how to add a simulation.
+* [`SECURITY.md`](SECURITY.md) · [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`LICENSE`](LICENSE).
+
+## 📄 License
+
+MIT © 2026 Taha. Built with React, Vite, three.js, KaTeX, tesseract.js and a lot of tests.
