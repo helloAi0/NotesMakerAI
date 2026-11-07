@@ -15,7 +15,7 @@
     "stubcheck": "vite-node tools/stubcheck.mts",
     "check": "npm run typecheck && npm run fuzz && npm run stubcheck && npm run build",
     "ocr:assets": "node tools/copy-ocr.mjs",
-    "predev": "node tools/copy-ocr.mjs",
+    "predev": "node tools/ensure-deps.mjs && node tools/copy-ocr.mjs",
     "prebuild": "node tools/copy-ocr.mjs",
     "postinstall": "node tools/copy-ocr.mjs",
     "test:unit": "tsx tools/i18n.mts && tsx tools/intents.mts && vite-node tools/fmt.mts && tsx tools/friday.mts && tsx tools/logic_cs.mts && tsx tools/logic_sci.mts && tsx tools/friday_fs.mts && tsx tools/friday_brain.mts && tsx tools/logic_gap.mts && tsx tools/logic_extra.mts && tsx tools/stt.mts && tsx tools/lecture.mts && tsx tools/cloud_dictation.mts && tsx tools/cloud_dictation_fast.mts && tsx tools/tts_engine.mts && tsx tools/yt_transcript.mts && tsx tools/dictation_join.mts && tsx tools/lecture_adv.mts && tsx tools/friday_agents.mts && tsx tools/wake.mts && tsx tools/journal_blob.mts && tsx tools/embed.mts && tsx tools/whisper_local.mts && tsx tools/report.mts && tsx tools/transcribe_retry.mts && tsx tools/platform_model.mts && tsx tools/platform_infra.mts && tsx tools/stepcheck.mts && tsx tools/exam_lab.mts && vite-node tools/predict.mts && tsx tools/course.mts && tsx tools/plugins.mts && tsx tools/trust_api.mts && tsx tools/room_pipeline.mts && tsx tools/langs.mts && tsx tools/pilot.mts && tsx tools/backup_profile.mts && tsx tools/demo.mts && tsx tools/bhasha_boards.mts && tsx tools/study_voice_ocr_swipe.mts && tsx tools/pytrace.mts && tsx tools/study_server_client.mts && tsx tools/study_fuzz.mts",
