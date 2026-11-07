@@ -7,6 +7,7 @@
 **An offline-first AI study workspace built for Indian students.**
 Notes that read themselves aloud · 200+ interactive STEM simulations · one multi-agent assistant (FRIDAY) · study tools in six languages · your data stays on your device.
 
+[![Live](https://img.shields.io/badge/live-notes--maker--ai--two.vercel.app-brightgreen?logo=vercel&logoColor=white)](https://notes-maker-ai-two.vercel.app)
 [![CI](https://github.com/helloAi0/NotesMakerAI/actions/workflows/ci.yml/badge.svg)](https://github.com/helloAi0/NotesMakerAI/actions/workflows/ci.yml)
 ![React](https://img.shields.io/badge/React-19-61dafb?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178c6?logo=typescript&logoColor=white)
@@ -15,6 +16,8 @@ Notes that read themselves aloud · 200+ interactive STEM simulations · one mul
 ![Node](https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=nodedotjs&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Status](https://img.shields.io/badge/status-private%20beta-orange)
+
+**[🌐 Live demo → notes-maker-ai-two.vercel.app](https://notes-maker-ai-two.vercel.app)**
 
 [Quick start](#-quick-start) · [Features](#-features) · [Architecture](#-architecture) · [Deploy](#-deploy-on-render) · [Testing](#-testing) · [Security](#-security-and-privacy) · [Roadmap](#-roadmap-and-honest-limits)
 
@@ -106,6 +109,9 @@ render.yaml    One-click Render Blueprint
 ```
 
 ## 🚀 Quick start
+
+Just want to try it? Open the **[live demo](https://notes-maker-ai-two.vercel.app)**: it runs fully in your browser, no sign-up. (Accounts, marketplace and bot need the optional server, which runs on a free Render instance and may take ~50 seconds to wake up.)
+
 
 Requirements: **Node 22+** (Node 20 works for everything except SQLite storage).
 
