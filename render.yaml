@@ -35,11 +35,19 @@ services:
     disk: { name: nm-data, mountPath: /var/data, sizeGB: 1 }
     envVars:
       - { key: NODE_VERSION, value: "22" }
-      - { key: NM_DATA, value: /var/data/data.json }
+      - { key: NM_DATA, value: /var/data/data.sqlite     # SQLite on the persistent disk (use a .json path for the simple file store) }
       - { key: NM_SECRET, generateValue: true }
       - { key: NM_TRUST_PROXY, value: "1" }
+      - { key: NM_APP_URL, sync: false }         # same as NM_ORIGIN: used in email links
+      - { key: RESEND_API_KEY, sync: false }     # optional: enables email verification + password reset (resend.com)
+      - { key: NM_MAIL_FROM, sync: false }       # e.g. Notes Maker <no-reply@yourdomain.com> (domain verified in Resend)
       - { key: NM_ORIGIN, sync: false }          # your web app URL, e.g. https://notes-maker-web.onrender.com
       - { key: NM_BOT_KEY, generateValue: true }
+      - { key: TELEGRAM_TOKEN, sync: false }     # optional: the bot runs inside this service
+      - { key: WA_TOKEN, sync: false }
+      - { key: WA_PHONE_ID, sync: false }
+      - { key: WA_APP_SECRET, sync: false }
+      - { key: WA_VERIFY_TOKEN, sync: false }
       - { key: RZP_KEY_ID, sync: false }         # optional: enables online payments
       - { key: RZP_KEY_SECRET, sync: false }
       - { key: RZP_WEBHOOK_SECRET, sync: false }

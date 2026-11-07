@@ -5,5 +5,5 @@
   "type": "module",
   "description": "Zero-dependency accounts, marketplace and chat-bot server for Notes Maker AI",
   "engines": { "node": ">=20" },
-  "scripts": { "start": "node server.mjs", "bot": "node bot.mjs", "bot:check": "node bot.mjs --check", "test": "node --test test.mjs bot.test.mjs gateway.test.mjs security.test.mjs" }
+  "scripts": { "start": "node server.mjs", "bot": "node bot.mjs", "bot:check": "node bot.mjs --check", "test": "node --test test.mjs bot.test.mjs gateway.test.mjs security.test.mjs bot.e2e.test.mjs" }
 }

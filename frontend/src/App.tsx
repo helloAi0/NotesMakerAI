@@ -42,6 +42,7 @@ function StartBanner({ go }: { go: (v: string) => void }) {
 }
 initLang();
 const Loading = () => <div className="h-full flex items-center justify-center text-sm text-slate-500 p-8">Loading…</div>;
+type TStatus = 'idle' | 'working' | 'needs-ai' | 'error' | 'done';
 import { useT, UI_LANGS, getUiLang, setUiLang, initLang } from './lib/i18n';
 import { BookOpen, Sparkles, Calendar, FileText, Search, PenTool, LayoutDashboard, Activity, Menu, X, Bot, Settings, Wifi, WifiOff, Clapperboard, Target, TrendingUp, GraduationCap, Rocket } from 'lucide-react';
 
@@ -49,10 +50,12 @@ const NAV: [ViewId, string, typeof BookOpen][] = [['dashboard', 'Dashboard', Lay
 
 export default function App() {
   const t = useT();
+  const lang = getUiLang(); const [tstat, setTstat] = useState<TStatus>('idle');
+  useEffect(() => { let off = () => {}; let dead = false; if (lang === 'en' && !sessionStorage.getItem('nm_dt')) return; sessionStorage.setItem('nm_dt', '1'); void import('./lib/domTranslate').then(m => { if (dead) return; off = m.onTranslateStatus(setTstat); m.applyLanguage(); }); return () => { dead = true; off(); }; }, [lang]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [landing, setLanding] = useState(() => { try { if (location.hash === '#welcome') return true; if (navigator.webdriver || localStorage.getItem('nm_landing_seen')) return false; return true; } catch { return false; } });
+  const [landing, setLanding] = useState(() => { try { if (location.hash === '#welcome') return true; if (/^#(verify|reset)=/.test(location.hash)) return false; if (navigator.webdriver || localStorage.getItem('nm_landing_seen')) return false; return true; } catch { return false; } });
   const enter = useCallback(() => { try { localStorage.setItem('nm_landing_seen', '1'); } catch { /* private mode */ } if (location.hash === '#welcome') history.replaceState(null, '', location.pathname + location.search); setLanding(false); }, []);
-  const [activeTab, setActiveTabRaw] = useState('notebook');
+  const [activeTab, setActiveTabRaw] = useState(() => (/^#(verify|reset)=/.test(location.hash) ? 'studio' : 'notebook'));
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
@@ -119,7 +122,8 @@ export default function App() {
           <div className="flex items-center gap-2 md:gap-4">
             <button onClick={() => setSearchOpen(true)} aria-label="Search" className="sm:hidden p-2 rounded-lg border border-amber-200 bg-white text-amber-800"><Search className="w-4 h-4"/></button>
             <button onClick={() => setLanding(true)} aria-label="Welcome page" title="Welcome page" data-testid="open-landing" className="hidden sm:inline-flex border border-amber-200 rounded-lg bg-white text-amber-900 text-xs py-2 px-2">✨</button>
-            <select value={getUiLang()} onChange={e => setUiLang(e.target.value)} aria-label="App language" data-testid="ui-lang" className="border border-amber-200 rounded-lg bg-white text-amber-900 text-xs py-2 px-1 max-w-24">{UI_LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
+            {lang !== 'en' && tstat !== 'idle' && tstat !== 'done' && <span role="status" data-notranslate className="hidden md:inline text-[11px] text-slate-500 max-w-40 leading-tight">{tstat === 'working' ? 'Translating…' : tstat === 'needs-ai' ? 'Add an AI key in Settings to translate the whole app' : 'Some text could not be translated'}</span>}
+            <select value={lang} onChange={e => setUiLang(e.target.value)} aria-label="App language" data-testid="ui-lang" className="border border-amber-200 rounded-lg bg-white text-amber-900 text-xs py-2 px-1 max-w-24">{UI_LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select>
             <button onClick={() => window.dispatchEvent(new Event('nm:open-settings'))} aria-label="Settings" title="Settings (AI key, backup)" data-testid="open-settings" className="p-2 rounded-lg border border-amber-200 bg-white text-amber-800 hover:bg-amber-50"><Settings className="w-4 h-4"/></button>
             <button 
               onClick={() => setActiveTab('simulations')}

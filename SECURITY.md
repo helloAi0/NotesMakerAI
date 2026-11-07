@@ -10,4 +10,4 @@ Please email the maintainers privately (or use GitHub's "Report a vulnerability"
 - The web app ships a strict Content-Security-Policy.
 
 ## Known limits (be honest with users and institutions)
-No email verification or password-reset-by-email yet, no external penetration test, JSON-file storage (not a database), no audit log, and payouts to creators are manual. Run `npm audit` regularly; four low-severity advisories in the katex rendering chain are currently open.
+Email verification and password reset exist but need a mail provider (Resend) and are verified here only with a fake mailer. Storage is SQLite or a JSON file on one server instance (no Postgres, no multi-instance scaling). No external penetration test, no audit log, payouts to creators are manual. Run `npm audit` regularly; four low-severity advisories in the katex rendering chain are currently open.

@@ -7,7 +7,7 @@ import { CodeViz, Swipe, Market, BotTab } from './studio/tabs2';
 const TABS: [string, string][] = [['bhasha', 'Bhasha (Indian languages)'], ['boards', 'Exam engines'], ['scan', 'Handwriting → LaTeX'], ['voice', 'Voice tutor'], ['code', 'Code visualizer'], ['swipe', 'Swipe recall'], ['market', 'Notes marketplace'], ['bot', 'Chat bot']];
 export default function StudioView() {
   const tr = useT();
-  const [tab, setTab] = useState(() => { try { return sessionStorage.getItem('nm_studio_tab') || 'bhasha'; } catch { return 'bhasha'; } });
+  const [tab, setTab] = useState(() => { try { if (/^#(verify|reset)=/.test(location.hash)) return 'market'; return sessionStorage.getItem('nm_studio_tab') || 'bhasha'; } catch { return 'bhasha'; } });
   const [material, setMaterial] = useState(''); const [result, setResult] = useState(''); const [bhRes, setBhRes] = useState<FlipResult | null>(null); const [boardOut, setBoardOut] = useState('');
   const go = (t: string) => { setTab(t); try { sessionStorage.setItem('nm_studio_tab', t); } catch { /* ignore */ } };
   return (

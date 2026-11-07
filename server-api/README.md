@@ -38,7 +38,10 @@ Set `RZP_KEY_ID`, `RZP_KEY_SECRET`, `RZP_WEBHOOK_SECRET` (and optionally `NM_FEE
 `POST /market/checkout` creates a Razorpay Payment Link; Razorpay calls `POST /webhooks/razorpay` (point the dashboard webhook at it, event `payment_link.paid`). The server verifies the `X-Razorpay-Signature` HMAC over the raw body, checks amount/currency/link id, is idempotent per payment id, and only then unlocks the notes. A creator cannot self-confirm an online sale.
 Honest limits: the code is verified only against a fake Razorpay in `gateway.test.mjs` (the sandbox has no internet and no Razorpay account). Money lands in **your** Razorpay account; `GET /market/earnings` shows what each creator is owed after the fee, but **paying creators out is manual** unless you add Razorpay Route (needs KYC). Refunds and disputes are handled in the Razorpay dashboard. Run a ₹5 test-mode payment before going live.
 
-## Chat bot (Telegram / WhatsApp)
+## Chat bot (Telegram / WhatsApp): simplest way
+Set `NM_BOT_KEY` (16+ chars) and `TELEGRAM_TOKEN` (from @BotFather) on the server and restart: **the bot now runs inside the same process**, no second program. For WhatsApp also set `WA_TOKEN`, `WA_PHONE_ID`, `WA_APP_SECRET`, `WA_VERIFY_TOKEN` and register `https://<server>/webhooks/whatsapp` in Meta (subscribe to `messages`). Check with `node bot.mjs --check`; in the app the Bot tab shows which transports are running. `bot.e2e.test.mjs` proves the whole chain against fake Telegram/Meta servers; real Telegram/WhatsApp delivery is still unverified in this repo.
+
+## Chat bot (Telegram / WhatsApp): separate process
 ```bash
 export NM_API=https://your-server NM_BOT_KEY=<same 16+ char secret the server has> TELEGRAM_TOKEN=<from @BotFather>
 export NM_GEMINI_KEY=<optional, to transcribe voice notes>

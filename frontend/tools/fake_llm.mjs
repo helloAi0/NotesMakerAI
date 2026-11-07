@@ -8,7 +8,7 @@ http.createServer((req, res) => {
   if (req.url?.endsWith('/models')) { res.writeHead(200, { ...cors, 'content-type': 'application/json' }); return res.end(JSON.stringify({ data: [{ id: 'tiny-test:1b' }] })); }
   if (req.url?.endsWith('/audio/transcriptions')) { let n = 0; req.on('data', c => (n += c.length)); req.on('end', () => { res.writeHead(200, { ...cors, 'content-type': 'application/json' }); res.end(JSON.stringify({ text: n > 2000 ? 'hello from transcription' : '' })); }); return; }
   if (req.url?.endsWith('/chat/completions')) { let body = ''; req.on('data', c => (body += c)); req.on('end', () => {
-    const j = JSON.parse(body || '{}'); const text = JSON.stringify(j.messages ?? []); let out = 'MODEL-ANSWER: the energy is $E=mc^2$.';
+    const j = JSON.parse(body || '{}'); const text = JSON.stringify(j.messages ?? []); let out = 'MODEL-ANSWER: the energy is $E=mc^2$.'; const last = String((j.messages ?? []).at(-1)?.content ?? ''); if (/Translate these short user-interface strings/.test(last)) { try { out = JSON.stringify(JSON.parse(last.slice(last.lastIndexOf('\n') + 1)).map(x => '«' + x + '»')); } catch { out = 'garbage'; } }
     if (/planner of FRIDAY/.test(text)) out = JSON.stringify({ version: 1, goal: 'x', steps: [{ action: 'fs.mkdir', label: 'Create folder Planned', args: { name: 'Planned' } }, { action: 'fs.ls', label: 'List', args: {} }] });
     if (/Review the DRAFT/.test(text)) out = 'REVIEWED: ' + out;
     if (j.stream) { res.writeHead(200, { ...cors, 'content-type': 'text/event-stream' }); for (const w of out.split(' ')) res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: w + ' ' } }] })}\n\n`); res.end('data: [DONE]\n\n'); }

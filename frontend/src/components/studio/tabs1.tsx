@@ -11,7 +11,7 @@ import { SCAN_PROMPT, parseScan, layoutGraph, checkLatex, toMarkdown, toLatexDoc
 import type { Scan } from '../../lib/study/mathocr';
 import { Narrator, cleanForSpeech } from '../../lib/study/interrupt';
 import { splitSentences } from '../../lib/lecture';
-import { getUiLang } from '../../lib/i18n';
+import { getUiLang, useT } from '../../lib/i18n';
 import { useDictation } from '../../lib/useVoice';
 import { parseJsonLoose } from '../../lib/aiClient';
 const MarkdownView = lazy(() => import('../MarkdownView'));
@@ -36,13 +36,13 @@ function useSpeaker() {
 
 /* ---------------- 1. Bhasha ---------------- */
 export function Bhasha({ material, setMaterial, onResult, res, setRes }: { material: string; setMaterial: (s: string) => void; onResult: (t: string) => void; res: FlipResult | null; setRes: (r: FlipResult | null) => void }) {
-  const ai = useAI(); const sp = useSpeaker(); const [lang, setLang] = useState(res?.lang ?? 'hi'); const [mode, setMode] = useState<'notes' | 'translate'>('notes'); const [uiLang, setUiLang] = useState<string>(() => getUiLang()); const abort = useRef<AbortController | null>(null);
+  const ai = useAI(); const sp = useSpeaker(); const [lang, setLang] = useState(res?.lang ?? 'hi'); const [mode, setMode] = useState<'notes' | 'translate'>('notes'); useT(); const uiLang: string = getUiLang(); const abort = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(''); const [err, setErr] = useState('');
   const run = async () => { setErr(''); setRes(null); if (!material.trim()) { setErr('Add some material first.'); return; } if (!ai.ready()) { setErr('Add an AI key or a local model in Settings first.'); return; } setBusy(ui(uiLang, 'working')); const ac = new AbortController(); abort.current = ac; try { const r = await flip(material, lang, ai.gen, { mode, signal: ac.signal, onProgress: (d, t) => setBusy(`${ui(uiLang, 'working')} ${d}/${t}`) }); if (r.failed >= r.chunks) setErr('The AI could not be reached, so nothing was translated. Check your key and internet, then try again.'); else { setRes(r); onResult(r.text); } } catch (e) { setErr((e as Error).message); } abort.current = null; setBusy(''); };
   const l = INDIAN.find(x => x.code === lang)!;
   return (
     <div className="space-y-3" data-testid="bhasha">
-      <div className={box}><div className="flex gap-2 flex-wrap items-center text-xs"><label>Interface language <select value={uiLang} onChange={e => setUiLang(e.target.value)} className="border rounded px-1 py-1" aria-label="Interface language" data-testid="bh-ui">{[{ code: 'en', native: 'English' }, ...INDIAN].map(x => <option key={x.code} value={x.code}>{x.native}</option>)}</select></label><span className="text-slate-500">Buttons below switch language. The rest of the app stays English (partly translated, wording not yet reviewed by native speakers).</span></div>
+      <div className={box}><div className="text-xs text-slate-500" data-notranslate>App language: use the language menu at the top of the page. Labels here follow it.</div>
         <Material value={material} onChange={setMaterial} label={ui(uiLang, 'upload')} /></div>
       <div className={box}><div className="flex gap-2 items-center flex-wrap"><label className="text-xs">{ui(uiLang, 'language')} <select value={lang} onChange={e => setLang(e.target.value)} className="border rounded px-2 py-1" aria-label="Target language" data-testid="bh-lang">{INDIAN.map(x => <option key={x.code} value={x.code}>{x.native} ({x.name})</option>)}</select></label>
         <select value={mode} onChange={e => setMode(e.target.value as 'notes' | 'translate')} className="border rounded px-2 py-1 text-xs" aria-label="Mode" data-testid="bh-mode"><option value="notes">Make study notes</option><option value="translate">Translate faithfully</option></select>

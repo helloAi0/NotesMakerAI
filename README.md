@@ -114,6 +114,11 @@ Tests: `npm run test:unit`, `npm run test:e2e` (includes `e2e_studio.mjs`, which
 - **Tests added:** `e2e_landing`, `e2e_sweep` (every view/tab/language), `e2e_monkey` (clicks every button: 271 clicks, clean), plus server `security.test.mjs`, `gateway.test.mjs`.
 - Deployment: `render.yaml`, `.env.example`, `CONTRIBUTING.md`; CI now also runs the new server tests.
 
+### Third round (bot, language, accounts, storage)
+- **Bot fixed:** the program-entry check (`file://${argv[1]}`) silently did nothing on Windows or paths with spaces, and nothing ever ran the bot on Render. It now runs **inside the main server** when `TELEGRAM_TOKEN`/`WA_*` are set, Telegram polling clears blocking webhooks, backs off, stops on a revoked token, WhatsApp send errors are logged, WhatsApp webhook is `/webhooks/whatsapp`. `bot.e2e.test.mjs` runs real server + real bot against fake Telegram/Meta servers. The Bot tab shows which transports run.
+- **Language:** picking a language now translates the whole app: menus from a dictionary, everything else by your own AI model (cloud key or local Ollama), cached on the device (`lib/domTranslate.ts`). User notes, inputs, code and chat answers are never touched. Needs an AI key for the long tail; machine translation, not reviewed by native speakers.
+- **Accounts:** email verification + password reset (Resend, or any injected mailer; links are single-use and die when the password changes), marketplace gated on verified email when mail is on. **Storage:** `NM_DATA=data.sqlite` uses SQLite (built into Node 22.5+) with transactions and WAL, importing an existing JSON file.
+
 ### Audit notes (what was found and fixed after the first release of Study Studio)
 - **Bhasha:** model output with Indic digits in term markers (⟦१⟧) was not restored; place and person names were frozen in English; whitespace around protected terms was lost; huge PDFs were sent in full (now capped at 30,000 characters with a visible notice); added Stop; scanned PDFs get an explanation; speech reads sentence by sentence (long text cut off before) and stops when you leave the tab.
 - **Exam engines:** unusable AI replies now show an error instead of an empty list.
